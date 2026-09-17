@@ -4,9 +4,10 @@
 // ============================================================================
 (function () {
   const isPlaceholder =
-    !window.FIREBASE_CONFIG ||
-    window.FIREBASE_CONFIG.apiKey === "PASTE_API_KEY_HERE" ||
-    !window.FIREBASE_CONFIG.apiKey;
+    typeof FIREBASE_CONFIG === "undefined" ||
+    !FIREBASE_CONFIG ||
+    FIREBASE_CONFIG.apiKey === "PASTE_API_KEY_HERE" ||
+    !FIREBASE_CONFIG.apiKey;
 
   if (isPlaceholder) {
     // لم يتم ضبط إعدادات Firebase بعد — نعرض تنبيهًا واضحًا بدل فشل صامت
@@ -24,7 +25,7 @@
   }
 
   try {
-    firebase.initializeApp(window.FIREBASE_CONFIG);
+    firebase.initializeApp(FIREBASE_CONFIG);
     window.__FSDB__ = firebase.firestore();
     window.__FIREBASE_READY__ = true;
   } catch (e) {
