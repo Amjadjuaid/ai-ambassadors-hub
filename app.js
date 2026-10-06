@@ -108,6 +108,32 @@ function checkGroup(name, options, selectedValues) {
       </label>`)
     .join("")}</div>`;
 }
+// سؤال واحد (Multiple Select) لأدوات الذكاء الاصطناعي والأتمتة، مقسّم بصريًا إلى فئات،
+// مع خيار "أخرى" في النهاية يُظهر حقل "اذكر الأداة" عند اختياره فقط.
+function aiAutomationToolsFieldHtml() {
+  const groupHtml = (label, tools) => `
+    <div class="field-label" style="margin-top:12px;font-weight:600;">${escapeHtml(label)}</div>
+    <div class="choice-group" role="group">${tools
+      .map((opt) => `
+        <label class="choice-pill">
+          <input type="checkbox" name="aiTools" value="${escapeHtml(opt)}"/>
+          ${escapeHtml(opt)}
+        </label>`)
+      .join("")}</div>`;
+  const groupsHtml = AI_AUTOMATION_TOOL_GROUPS.map((g) => groupHtml(g.label, g.tools)).join("");
+  return `
+    ${groupsHtml}
+    <div class="field-label" style="margin-top:12px;font-weight:600;">أخرى</div>
+    <div class="choice-group" role="group">
+      <label class="choice-pill">
+        <input type="checkbox" name="aiTools" id="aiToolsOtherCheckbox" value="${escapeHtml(AI_AUTOMATION_TOOLS_OTHER)}"/>
+        ${escapeHtml(AI_AUTOMATION_TOOLS_OTHER)}
+      </label>
+    </div>
+    <div id="aiToolsOtherWrap" style="display:none;margin-top:8px;">
+      <input type="text" name="aiToolsOther" placeholder="اذكر الأداة" />
+    </div>`;
+}
 function selectOptions(items, valueKey, labelKey, selected, placeholder) {
   const opts = items.map((it) => {
     const v = valueKey ? it[valueKey] : it;
@@ -199,7 +225,7 @@ function pageHome() {
     <div class="card callout-card">
       <h3>تريد المساهمة في بناء حلول الذكاء الاصطناعي؟</h3>
       <p class="text-muted">إذا كانت لديك خبرة أو رغبة في المساهمة ضمن فرق تطوير حلول الذكاء
-        الاصطناعي داخل المؤسسة، سجّل اهتمامك وسيتواصل معك أحد سفراء الذكاء الاصطناعي.</p>
+        الاصطناعي، سجّل اهتمامك وسيتواصل معك أحد سفراء الذكاء الاصطناعي.</p>
       <a class="btn btn-outline" href="#/share/participate">سجّل اهتمامك بالمشاركة</a>
     </div>`;
 }
@@ -284,9 +310,8 @@ function pageShareParticipate() {
     <form data-form="submitParticipation" class="card" style="max-width:680px;">
       ${employeeFieldsHtml()}
       <div class="form-group">
-        <label class="field-label">أدوات الذكاء الاصطناعي التي تستخدمها</label>
-        ${checkGroup("aiTools", AI_TOOLS, [])}
-        <input type="text" name="aiToolsOther" placeholder="إذا اخترت «أخرى» اذكرها هنا" style="margin-top:8px;" />
+        <label class="field-label">ما أدوات الذكاء الاصطناعي أو الأتمتة التي تستخدمها أو لديك خبرة بها؟</label>
+        ${aiAutomationToolsFieldHtml()}
       </div>
       <div class="form-group">
         <label class="field-label">هل سبق لك بناء منتج أو حل باستخدام الذكاء الاصطناعي؟</label>
@@ -613,7 +638,7 @@ function pageParticipationDetail(id) {
       <div class="kv-list">
         <div class="kv-item"><div class="k">الرقم الوظيفي</div><div class="v">${escapeHtml(p.employeeId)}</div></div>
         <div class="kv-item"><div class="k">المسار / الإدارة</div><div class="v">${escapeHtml(p.department)} / ${escapeHtml(p.track)}</div></div>
-        <div class="kv-item"><div class="k">أدوات الذكاء الاصطناعي</div><div class="v">${escapeHtml((p.aiTools || []).join("، ") || "—")}${p.aiToolsOther ? " — " + escapeHtml(p.aiToolsOther) : ""}</div></div>
+        <div class="kv-item"><div class="k">أدوات الذكاء الاصطناعي والأتمتة</div><div class="v">${escapeHtml((p.aiTools || []).join("، ") || "—")}${p.aiToolsOther ? " — " + escapeHtml(p.aiToolsOther) : ""}</div></div>
         <div class="kv-item"><div class="k">بناء منتج سابق؟</div><div class="v">${escapeHtml(p.hasBuiltBefore || "—")}</div></div>
         <div class="kv-item"><div class="k">تاريخ الطلب</div><div class="v">${formatDate(p.submittedAt || p.createdAt)}</div></div>
       </div>
@@ -720,6 +745,11 @@ document.addEventListener("click", (e) => {
 });
 
 document.addEventListener("change", (e) => {
+  if (e.target && e.target.id === "aiToolsOtherCheckbox") {
+    const wrap = document.getElementById("aiToolsOtherWrap");
+    if (wrap) wrap.style.display = e.target.checked ? "block" : "none";
+    return;
+  }
   const auto = e.target.closest("[data-autochange]");
   if (!auto) return;
   const action = auto.dataset.autochange;
