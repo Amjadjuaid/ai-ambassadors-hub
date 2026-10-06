@@ -146,6 +146,14 @@ function deptTrackSelectOptions(selected) {
   const items = [...DEPARTMENTS.map((d) => ({ v: d })), ...AI_TRACKS.map((t) => ({ v: t }))];
   return selectOptions(items, "v", "v", selected, "الكل — المسار / الإدارة");
 }
+// قائمة السفراء دائمًا تُعرض بصيغة: الاسم — المسار/الإدارة
+function ambassadorSelectOptions(selected, placeholder) {
+  const opts = State.ambassadors.map((a) => {
+    const label = a.department ? `${a.name} — ${a.department}` : a.name;
+    return `<option value="${escapeHtml(a.id)}" ${String(a.id) === String(selected) ? "selected" : ""}>${escapeHtml(label)}</option>`;
+  });
+  return (placeholder !== undefined ? `<option value="">${escapeHtml(placeholder)}</option>` : "") + opts.join("");
+}
 
 // ---------------------------------------------------------------------------
 // الهيدر (شريط التنقل) — ثلاثة عناصر رئيسية فقط
@@ -345,45 +353,20 @@ function pageWorkspaceGate() {
   if (!State.loaded.ambassadors) return loadingHtml();
   return `
     <div class="page-title-row"><h2>بوابة السفراء</h2></div>
-    <div class="grid grid-2">
-      <div class="card" style="max-width:420px;">
-        <h3>دخول سفير مسجَّل</h3>
-        <p class="text-muted" style="font-size:13.5px;">هذه المساحة مخصصة لسفراء الذكاء الاصطناعي فقط.</p>
-        <form data-form="ambassadorGate">
-          <div class="form-group">
-            <label class="field-label">أنا:</label>
-            <select name="ambassadorId" required>${selectOptions(State.ambassadors, "id", "name", null, "اختر اسمك")}</select>
-          </div>
-          <div class="form-group">
-            <label class="field-label">كود الوصول</label>
-            <input type="text" name="code" required placeholder="••••••••" />
-          </div>
-          <button class="btn btn-primary btn-block" type="submit">دخول</button>
-        </form>
-      </div>
-      <div class="card" style="max-width:420px;">
-        <h3>سفير جديد؟</h3>
-        <p class="text-muted" style="font-size:13.5px;">سجّل بياناتك لإضافة ملفك كسفير ذكاء اصطناعي.</p>
-        <form data-form="ambassadorRegister">
-          <div class="form-group">
-            <label class="field-label">الاسم الثنائي</label>
-            <input type="text" name="name" required placeholder="اسمك الكامل" />
-          </div>
-          <div class="form-group">
-            <label class="field-label">الإدارة</label>
-            <select name="department" required>${selectOptions(DEPARTMENTS, null, null, null, "اختر الإدارة")}</select>
-          </div>
-          <div class="form-group">
-            <label class="field-label">المسار</label>
-            <select name="track" required>${selectOptions(AI_TRACKS, null, null, null, "اختر المسار")}</select>
-          </div>
-          <div class="form-group">
-            <label class="field-label">كود الوصول</label>
-            <input type="text" name="code" required placeholder="••••••••" />
-          </div>
-          <button class="btn btn-outline btn-block" type="submit">تسجيل وإنشاء ملف سفير</button>
-        </form>
-      </div>
+    <div class="card" style="max-width:420px;margin:0 auto;">
+      <h3>دخول سفير مسجَّل</h3>
+      <p class="text-muted" style="font-size:13.5px;">هذه المساحة مخصصة لسفراء الذكاء الاصطناعي فقط.</p>
+      <form data-form="ambassadorGate">
+        <div class="form-group">
+          <label class="field-label">أنا:</label>
+          <select name="ambassadorId" required>${ambassadorSelectOptions(null, "اختر اسمك")}</select>
+        </div>
+        <div class="form-group">
+          <label class="field-label">كود الوصول</label>
+          <input type="text" name="code" required placeholder="••••••••" />
+        </div>
+        <button class="btn btn-primary btn-block" type="submit">دخول</button>
+      </form>
     </div>`;
 }
 
@@ -453,7 +436,7 @@ function filterBarHtml(basePath, query, statusList) {
     <form class="filter-bar card" data-form="filterForm" data-base="${basePath}">
       <input type="hidden" name="scope" value="${escapeHtml(query.scope === "all" ? "all" : "mine")}" />
       <input type="text" name="q" value="${escapeHtml(query.q || "")}" placeholder="بحث بالعنوان أو رقم الطلب أو اسم الموظف" />
-      <select name="amb">${selectOptions(State.ambassadors, "id", "name", query.amb, "كل السفراء")}</select>
+      <select name="amb">${ambassadorSelectOptions(query.amb, "كل السفراء")}</select>
       <select name="dept">${deptTrackSelectOptions(query.dept)}</select>
       <select name="status">${selectOptions(statusList, "id", "label", query.status, "كل الحالات")}</select>
       <button class="btn btn-outline btn-sm" type="submit">تطبيق الفلاتر</button>
@@ -581,7 +564,7 @@ function managementSectionHtml(item, kind, statusList) {
           <label class="field-label">السفير المسؤول</label>
           <select data-autochange="reassign" data-id="${escapeHtml(item.id)}" data-kind="${kind}">
             <option value="">غير معيّن</option>
-            ${selectOptions(State.ambassadors, "id", "name", item.assignedAmbassadorId)}
+            ${ambassadorSelectOptions(item.assignedAmbassadorId)}
           </select>
         </div>
       </div>
@@ -856,21 +839,6 @@ document.addEventListener("submit", (e) => {
     saveLocalAmbassador({ ambassadorId, name: amb.name });
     toast("مرحبًا بك، " + amb.name);
     navigate("#/workspace/challenges");
-    return;
-  }
-
-  if (type === "ambassadorRegister") {
-    const code = val("code");
-    if (code !== AMBASSADOR_ACCESS_CODE) { toast("كود الوصول غير صحيح", "error"); return; }
-    const name = val("name"), department = val("department"), track = val("track");
-    if (!name || !department || !track) { toast("يرجى تعبئة كل الحقول", "error"); return; }
-    DataLayer.ambassadors.create({ name, department, track })
-      .then((amb) => {
-        saveLocalAmbassador({ ambassadorId: amb.id, name: amb.name });
-        toast("تم إنشاء ملفك كسفير بنجاح");
-        navigate("#/workspace/challenges");
-      })
-      .catch((err) => toast("تعذّر إنشاء الملف: " + err.message, "error"));
     return;
   }
 
