@@ -1,73 +1,75 @@
 // ============================================================================
-// AI Ambassadors Hub — بوابة سفراء الذكاء الاصطناعي
+// AI Ambassadors Hub — سفراء الذكاء الاصطناعي
 // constants.js — كل القوائم الثابتة والإعدادات المشتركة في مكان واحد.
 // عدّل القيم هنا فقط عند الحاجة لتغيير الخيارات المعروضة في كل الصفحات.
 // ============================================================================
 
 // كود وصول مساحة السفراء — ليس نظام حماية حقيقي، فقط لمنع الدخول العرضي
-// للموظفين العاديين. غيّره وشاركه مع السفراء العشرة خارج هذا الملف.
+// للموظفين العاديين. غيّره وشاركه مع السفراء خارج هذا الملف قبل الاستخدام الفعلي.
 const AMBASSADOR_ACCESS_CODE = "AMB-2026";
 
-// حالات الطلب — الترتيب هنا هو نفس ترتيب الظهور في المخطط الزمني
-const STATUSES = [
-  { id: "new", label: "جديد", color: "status-new" },
-  { id: "under_review", label: "قيد المراجعة", color: "status-review" },
-  { id: "need_info", label: "بحاجة لمعلومات إضافية", color: "status-warn" },
-  { id: "consultation", label: "يتطلب استشارة", color: "status-warn" },
-  { id: "potential_use_case", label: "فرصة ذكاء اصطناعي محتملة", color: "status-potential" },
-  { id: "in_progress", label: "قيد التنفيذ", color: "status-progress" },
-  { id: "completed", label: "مكتمل", color: "status-done" },
-  { id: "closed", label: "مغلق", color: "status-closed" },
+// ----------------------------------------------------------------------------
+// حالات التحديات
+// ----------------------------------------------------------------------------
+const CHALLENGE_STATUSES = [
+  { id: "received", label: "تم استلام التحدي" },
+  { id: "studying", label: "قيد دراسة التحدي" },
+  { id: "need_info", label: "بحاجة لمعلومات إضافية" },
+  { id: "verified", label: "تم التحقق من التحدي" },
+  { id: "evaluating", label: "قيد تقييم الفرصة" },
+  { id: "approved", label: "معتمد للعمل عليه" },
+  { id: "forming_team", label: "جارٍ تشكيل فريق الحل" },
+  { id: "designing", label: "قيد تصميم الحل" },
+  { id: "prototyping", label: "قيد بناء نموذج أولي" },
+  { id: "testing", label: "قيد التجربة والاختبار" },
+  { id: "implementing", label: "قيد التنفيذ" },
+  { id: "launched", label: "تم إطلاق الحل" },
+  { id: "measuring", label: "قيد قياس الأثر" },
+  { id: "completed", label: "مكتمل" },
+  { id: "not_suitable", label: "غير مناسب حاليًا" },
+  { id: "duplicate", label: "مكرر" },
+  { id: "closed_no_action", label: "مغلق بدون تنفيذ" },
 ];
-
-function statusLabel(id) {
-  const s = STATUSES.find((x) => x.id === id);
-  return s ? s.label : id;
+const CHALLENGE_DEFAULT_STATUS = "received";
+// الحالات التي تتطلب إلزاميًا كتابة سبب الإغلاق قبل الحفظ
+const CHALLENGE_CLOSURE_STATUSES = new Set(["not_suitable", "duplicate", "closed_no_action"]);
+function challengeStatusLabel(id) {
+  const s = CHALLENGE_STATUSES.find((x) => x.id === id);
+  return s ? s.label : (id || "—");
 }
-function statusColor(id) {
-  const s = STATUSES.find((x) => x.id === id);
-  return s ? s.color : "status-new";
-}
-// حالات "نشطة" لأغراض الفلترة والإحصاءات
-const ACTIVE_STATUSES = ["under_review", "need_info", "consultation", "potential_use_case", "in_progress"];
+function isChallengeClosureStatus(id) { return CHALLENGE_CLOSURE_STATUSES.has(id); }
+function isChallengeOpenStatus(id) { return id !== "completed" && !CHALLENGE_CLOSURE_STATUSES.has(id); }
 
-// فئات التصنيف (يدوية بالكامل — بدون أي تصنيف آلي في هذا الإصدار)
-const CATEGORIES = [
-  { id: "automation", label: "أتمتة" },
-  { id: "data_analytics", label: "البيانات والتحليلات" },
-  { id: "genai", label: "الذكاء الاصطناعي التوليدي" },
-  { id: "productivity", label: "الإنتاجية" },
-  { id: "knowledge_mgmt", label: "إدارة المعرفة" },
-  { id: "software_dev", label: "تطوير البرمجيات" },
-  { id: "quality", label: "الجودة" },
-  { id: "operations", label: "العمليات" },
-  { id: "hr", label: "الموارد البشرية" },
-  { id: "finance", label: "المالية" },
-  { id: "other", label: "أخرى" },
+// ----------------------------------------------------------------------------
+// حالات طلبات المشاركة (Workflow منفصل وبسيط)
+// ----------------------------------------------------------------------------
+const PARTICIPATION_STATUSES = [
+  { id: "new", label: "طلب جديد" },
+  { id: "reviewed", label: "تمت المراجعة" },
+  { id: "contacted", label: "تم التواصل" },
+  { id: "joined", label: "تم ضمه لفريق / مبادرة" },
+  { id: "closed", label: "مغلق" },
 ];
-function categoryLabel(id) {
-  const c = CATEGORIES.find((x) => x.id === id);
-  return c ? c.label : "—";
+const PARTICIPATION_DEFAULT_STATUS = "new";
+function participationStatusLabel(id) {
+  const s = PARTICIPATION_STATUSES.find((x) => x.id === id);
+  return s ? s.label : (id || "—");
 }
 
-// أنواع المساعدة المطلوبة
-const HELP_TYPES = [
-  "لدي مشكلة ولا أعرف الحل",
-  "أريد أتمتة مهمة",
-  "أحتاج مساعدة في استخدام أداة AI",
-  "أحتاج Prompt",
-  "أحتاج تحليل بيانات",
-  "لدي فكرة لاستخدام AI",
+// ----------------------------------------------------------------------------
+// أسباب إعادة الإسناد (اختيار سريع + حقل آخر عند الحاجة)
+// ----------------------------------------------------------------------------
+const REASSIGNMENT_REASONS = [
+  "التخصص الأنسب",
+  "توزيع الأحمال",
+  "حسب المسار / الإدارة",
+  "بناءً على التنسيق بين السفراء",
   "أخرى",
 ];
 
-// تكرار المهمة
-const FREQUENCIES = ["يوميًا", "أسبوعيًا", "شهريًا", "عند الحاجة"];
-
-// نطاق التأثر
-const SCOPES = ["أنا فقط", "فريقي", "إدارتي", "أكثر من إدارة"];
-
-// الإدارات (تُستخدم في نموذج التسجيل وربط السفراء)
+// ----------------------------------------------------------------------------
+// الإدارات والمسارات
+// ----------------------------------------------------------------------------
 const DEPARTMENTS = [
   "تقنية المعلومات",
   "الموارد البشرية",
@@ -82,7 +84,6 @@ const DEPARTMENTS = [
   "أخرى",
 ];
 
-// مسارات الذكاء الاصطناعي للسفراء
 const AI_TRACKS = [
   "الأتمتة وتحسين الإجراءات",
   "تحليل البيانات والتقارير",
@@ -91,20 +92,20 @@ const AI_TRACKS = [
   "تطوير الحلول التقنية",
 ];
 
-// عدد أحرف عشوائي لتوليد رقم الطلب
-function generateRequestId() {
-  const d = new Date();
-  const yy = String(d.getFullYear()).slice(2);
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let suffix = "";
-  for (let i = 0; i < 4; i++) suffix += chars[Math.floor(Math.random() * chars.length)];
-  return `REQ-${yy}${mm}${dd}-${suffix}`;
-}
+// أدوات الذكاء الاصطناعي الشائعة (لطلبات المشاركة)
+const AI_TOOLS = [
+  "ChatGPT",
+  "Microsoft Copilot",
+  "Claude",
+  "Gemini",
+  "أدوات توليد الصور / الفيديو",
+  "أدوات تحليل البيانات",
+  "أخرى",
+];
 
-// نستخدم التقويم الميلادي صراحة (ar-SA-u-ca-gregory) لتفادي أي التباس بين
-// التاريخ الهجري والميلادي، مع إبقاء أسماء الأشهر بالعربية.
+// ----------------------------------------------------------------------------
+// تنسيق التاريخ — تقويم ميلادي صراحة لتفادي أي التباس، بأسماء عربية.
+// ----------------------------------------------------------------------------
 const AR_LOCALE = "ar-SA-u-ca-gregory";
 function formatDate(value) {
   if (!value) return "—";
