@@ -42,7 +42,7 @@ const DataLayer = (() => {
   const ambassadors = {
     async list() {
       const snap = await db().collection("ambassadors").get();
-      const list = snap.docs.map(docToObj);
+      const list = snap.docs.map(docToObj).filter((a) => a && a.isDemo !== true);
       list.sort((a, b) => (a.name || "").localeCompare(b.name || "", "ar"));
       return list;
     },
@@ -62,7 +62,7 @@ const DataLayer = (() => {
     },
     subscribeAll(cb, onError) {
       return db().collection("ambassadors").onSnapshot((snap) => {
-        const list = snap.docs.map(docToObj);
+        const list = snap.docs.map(docToObj).filter((a) => a && a.isDemo !== true);
         list.sort((a, b) => (a.name || "").localeCompare(b.name || "", "ar"));
         cb(list);
       }, onError);
@@ -124,13 +124,13 @@ const DataLayer = (() => {
       },
       async listAll() {
         const snap = await col().get();
-        const list = snap.docs.map(docToObj);
+        const list = snap.docs.map(docToObj).filter((x) => x && x.archived !== true && x.isTest !== true);
         list.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
         return list;
       },
       subscribeAll(cb, onError) {
         return col().onSnapshot((snap) => {
-          const list = snap.docs.map(docToObj);
+          const list = snap.docs.map(docToObj).filter((x) => x && x.archived !== true && x.isTest !== true);
           list.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
           cb(list);
         }, onError);
