@@ -92,16 +92,44 @@ const AI_TRACKS = [
   "تطوير الحلول التقنية",
 ];
 
-// أدوات الذكاء الاصطناعي الشائعة (لطلبات المشاركة)
-const AI_TOOLS = [
-  "ChatGPT",
-  "Microsoft Copilot",
-  "Claude",
-  "Gemini",
-  "أدوات توليد الصور / الفيديو",
-  "أدوات تحليل البيانات",
-  "أخرى",
+// أدوات الذكاء الاصطناعي والأتمتة الشائعة (لطلبات المشاركة) — مقسّمة إلى فئات لعرضها
+// بصريًا ضمن نفس السؤال (Multiple Select واحد)، مع خيار "أخرى" في النهاية.
+const AI_AUTOMATION_TOOL_GROUPS = [
+  {
+    label: "أدوات الذكاء الاصطناعي والتطوير",
+    tools: [
+      "ChatGPT",
+      "Claude",
+      "Gemini",
+      "Microsoft Copilot",
+      "OpenAI Codex",
+      "GitHub Copilot",
+      "Cursor",
+      "Replit",
+      "Lovable",
+      "Bolt",
+    ],
+  },
+  {
+    label: "أدوات الأتمتة وبناء الـ Workflows",
+    tools: [
+      "n8n",
+      "Microsoft Power Automate",
+      "Make",
+      "Zapier",
+      "Copilot Studio",
+      "UiPath",
+    ],
+  },
+  {
+    label: "أدوات البيانات والتحليل",
+    tools: [
+      "Power BI",
+      "Excel / Power Query",
+    ],
+  },
 ];
+const AI_AUTOMATION_TOOLS_OTHER = "أخرى";
 
 // ----------------------------------------------------------------------------
 // تنسيق التاريخ — تقويم ميلادي صراحة لتفادي أي التباس، بأسماء عربية.
