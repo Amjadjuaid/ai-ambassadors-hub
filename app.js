@@ -1,43 +1,31 @@
 // ============================================================================
 // app.js — التوجيه (Router) وكل واجهات العرض والتفاعل.
-// SPA بسيطة بدون أي إطار عمل: hash router + innerHTML rendering + event
-// delegation. مصممة لتبقى قابلة للقراءة والتعديل من غير مطوّر متمرّس.
+// SPA بدون أي إطار عمل: hash router + innerHTML rendering + event delegation.
 // ============================================================================
 
 const State = {
-  employee: null,
   ambIdentity: null,
   ambUnlocked: false,
-  requests: [],
   ambassadors: [],
-  clusters: [],
-  loaded: { requests: false, ambassadors: false, clusters: false },
+  challenges: [],
+  participation: [],
+  loaded: { ambassadors: false, challenges: false, participation: false },
 };
 
 // مسارات لا يُعاد رسمها تلقائيًا عند وصول بيانات جديدة (حتى لا تُفقد مدخلات
 // المستخدم الجارية في نموذج مفتوح)
-const NO_AUTO_RERENDER = new Set(["submit", "workspace-hours"]);
+const NO_AUTO_RERENDER = new Set(["share-challenge", "share-participate"]);
 let currentRouteKey = "";
 
 // ---------------------------------------------------------------------------
-// تخزين الهوية محليًا (على هذا الجهاز فقط — وليس بديلاً عن قاعدة البيانات)
+// تخزين هوية السفير محليًا (على هذا الجهاز فقط)
 // ---------------------------------------------------------------------------
 function loadLocalIdentities() {
   try {
-    const emp = localStorage.getItem("aah_employee");
-    if (emp) State.employee = JSON.parse(emp);
     const amb = localStorage.getItem("aah_amb_identity");
     if (amb) State.ambIdentity = JSON.parse(amb);
     State.ambUnlocked = localStorage.getItem("aah_amb_unlocked") === "1";
   } catch (e) { /* تجاهل أخطاء التخزين المحلي (وضع خاص مثلًا) */ }
-}
-function saveLocalEmployee(emp) {
-  State.employee = emp;
-  try { localStorage.setItem("aah_employee", JSON.stringify(emp)); } catch (e) {}
-}
-function clearLocalEmployee() {
-  State.employee = null;
-  try { localStorage.removeItem("aah_employee"); } catch (e) {}
 }
 function saveLocalAmbassador(identity) {
   State.ambIdentity = identity;
@@ -66,7 +54,7 @@ function toast(message, type) {
   el.className = "toast" + (type === "error" ? " error" : "");
   el.textContent = message;
   root.appendChild(el);
-  setTimeout(() => el.remove(), 3400);
+  setTimeout(() => el.remove(), 3600);
 }
 function openModal(html) {
   document.getElementById("modal-root").innerHTML =
@@ -74,7 +62,7 @@ function openModal(html) {
        <div class="modal-box" data-action="noop">
          <div class="flex-between" style="margin-bottom:10px;">
            <div></div>
-           <button class="btn btn-ghost btn-sm" data-action="closeModal" type="button">✕ إغلاق</button>
+           <button class="btn btn-ghost btn-sm" data-action="closeModal" type="button">إغلاق</button>
          </div>
          ${html}
        </div>
@@ -86,35 +74,36 @@ function closeModal() { document.getElementById("modal-root").innerHTML = ""; }
 // دوال مساعدة على البيانات
 // ---------------------------------------------------------------------------
 function getAmbassadorById(id) { return State.ambassadors.find((a) => a.id === id) || null; }
-function getRequestById(id) { return State.requests.find((r) => r.id === id) || null; }
-function getClusterById(id) { return State.clusters.find((c) => c.id === id) || null; }
-function isOpenStatus(status) { return status !== "completed" && status !== "closed"; }
-function openCountForAmbassador(ambId) {
-  return State.requests.filter((r) => r.assignedAmbassadorId === ambId && isOpenStatus(r.status)).length;
-}
-function requestsForCluster(cluster) {
-  return (cluster.requestIds || []).map(getRequestById).filter(Boolean);
-}
-function deptCountForCluster(cluster) {
-  const depts = new Set(requestsForCluster(cluster).map((r) => r.department).filter(Boolean));
-  return depts.size;
-}
+function getChallengeById(id) { return State.challenges.find((r) => r.id === id || r._id === id) || null; }
+function getParticipationById(id) { return State.participation.find((r) => r.id === id || r._id === id) || null; }
 function initials(name) { return (name || "؟").trim().charAt(0); }
+function myId() { return State.ambIdentity ? State.ambIdentity.ambassadorId : null; }
+
+function challengeOpenCountForAmbassador(ambId) {
+  return State.challenges.filter((r) => r.assignedAmbassadorId === ambId && isChallengeOpenStatus(r.status)).length;
+}
 
 // ---------------------------------------------------------------------------
 // مكوّنات HTML قابلة لإعادة الاستخدام
 // ---------------------------------------------------------------------------
-function statusBadge(statusId) {
-  return `<span class="badge ${statusColor(statusId)}">${escapeHtml(statusLabel(statusId))}</span>`;
-}
-function demoBadge(isDemo) {
-  return isDemo ? `<span class="badge badge-demo">بيانات تجريبية</span>` : "";
-}
+function challengeStatusBadge(id) { return `<span class="badge ${isChallengeClosureStatus(id) ? "status-closed" : (id === "completed" ? "status-done" : "status-progress")}">${escapeHtml(challengeStatusLabel(id))}</span>`; }
+function participationStatusBadge(id) { return `<span class="badge ${id === "closed" ? "status-closed" : (id === "joined" ? "status-done" : "status-progress")}">${escapeHtml(participationStatusLabel(id))}</span>`; }
+
 function pillGroup(name, options, selectedValue, required) {
   return `<div class="choice-group" role="radiogroup">${options
-    .map((opt, i) => `
+    .map((opt) => `
       <label class="choice-pill">
         <input type="radio" name="${name}" value="${escapeHtml(opt)}" ${opt === selectedValue ? "checked" : ""} ${required ? "required" : ""}/>
+        ${escapeHtml(opt)}
+      </label>`)
+    .join("")}</div>`;
+}
+function checkGroup(name, options, selectedValues) {
+  const sel = selectedValues || [];
+  return `<div class="choice-group" role="group">${options
+    .map((opt) => `
+      <label class="choice-pill">
+        <input type="checkbox" name="${name}" value="${escapeHtml(opt)}" ${sel.includes(opt) ? "checked" : ""}/>
         ${escapeHtml(opt)}
       </label>`)
     .join("")}</div>`;
@@ -125,77 +114,15 @@ function selectOptions(items, valueKey, labelKey, selected, placeholder) {
     const l = labelKey ? it[labelKey] : it;
     return `<option value="${escapeHtml(v)}" ${String(v) === String(selected) ? "selected" : ""}>${escapeHtml(l)}</option>`;
   });
-  return (placeholder ? `<option value="">${escapeHtml(placeholder)}</option>` : "") + opts.join("");
+  return (placeholder !== undefined ? `<option value="">${escapeHtml(placeholder)}</option>` : "") + opts.join("");
 }
-
-function ambassadorCardHtml(amb) {
-  const openCount = openCountForAmbassador(amb.id);
-  return `
-    <div class="card amb-card">
-      ${demoBadge(amb.isDemo)}
-      <div class="amb-head">
-        <div class="amb-avatar">${escapeHtml(initials(amb.name))}</div>
-        <div>
-          <div class="amb-name">${escapeHtml(amb.name)}</div>
-          <div class="amb-dept">${escapeHtml(amb.department)}</div>
-        </div>
-      </div>
-      <div class="amb-track">${escapeHtml(amb.track || "")}</div>
-      <div class="amb-areas">${(amb.helpAreas || []).map((a) => `<span class="tag">${escapeHtml(a)}</span>`).join("")}</div>
-      <div class="amb-footer">
-        <span class="open-count"><b>${openCount}</b> طلب مفتوح</span>
-        <a class="btn btn-outline btn-sm" href="#/ambassador/${encodeURIComponent(amb.id)}">عرض الملف</a>
-      </div>
-    </div>`;
-}
-
-function requestCardHtml(req, opts) {
-  opts = opts || {};
-  const href = opts.workspace ? `#/workspace/requests/${encodeURIComponent(req.id)}` : `#/request/${encodeURIComponent(req.id)}`;
-  const metaExtra = opts.workspace
-    ? `<span>${escapeHtml(req.employeeName || "—")} · ${escapeHtml(req.department || "—")}</span>`
-    : "";
-  return `
-    <a class="card req-card" href="${href}" style="text-decoration:none;color:inherit;display:block;">
-      <div class="req-top">
-        <div class="req-title">${escapeHtml(req.title)}</div>
-        ${statusBadge(req.status)}
-      </div>
-      <div class="req-meta">
-        ${metaExtra}
-        <span>${escapeHtml(categoryLabel(req.category) || "غير مصنف")}</span>
-        <span>${escapeHtml(req.assignedAmbassadorName ? "السفير: " + req.assignedAmbassadorName : "غير معيّن")}</span>
-        <span>${formatDate(req.createdAt)}</span>
-        <span class="req-id">${escapeHtml(req.id)}</span>
-        ${req.duplicateOf ? '<span class="badge badge-outline">مكرر</span>' : ""}
-        ${demoBadge(req.isDemo)}
-      </div>
-    </a>`;
-}
-
-function timelineHtml(req) {
-  const items = [];
-  items.push({ title: "تم إنشاء الطلب", at: req.createdAt, text: "الحالة الأولية: " + statusLabel("new") });
-  (req.updates || []).forEach((u) => items.push({ title: "تحديث من السفير", at: u.at, text: u.text }));
-  items.sort((a, b) => (a.at || "").localeCompare(b.at || ""));
-  items.push({ title: "الحالة الحالية: " + statusLabel(req.status), at: req.updatedAt, text: "", current: true });
-  return `<div class="timeline">${items
-    .map(
-      (it) => `
-      <div class="timeline-item ${it.current ? "" : "faded"}">
-        <div class="timeline-dot"></div>
-        <div class="timeline-body">
-          <div class="timeline-title">${escapeHtml(it.title)}</div>
-          <div class="timeline-date">${formatDateTime(it.at)}</div>
-          ${it.text ? `<div class="timeline-text">${escapeHtml(it.text)}</div>` : ""}
-        </div>
-      </div>`
-    )
-    .join("")}</div>`;
+function deptTrackSelectOptions(selected) {
+  const items = [...DEPARTMENTS.map((d) => ({ v: d })), ...AI_TRACKS.map((t) => ({ v: t }))];
+  return selectOptions(items, "v", "v", selected, "الكل — المسار / الإدارة");
 }
 
 // ---------------------------------------------------------------------------
-// الهيدر (شريط التنقل)
+// الهيدر (شريط التنقل) — ثلاثة عناصر رئيسية فقط
 // ---------------------------------------------------------------------------
 function renderHeader(parts) {
   const active = parts[0] || "home";
@@ -214,20 +141,13 @@ function renderHeader(parts) {
   document.getElementById("site-header").innerHTML = `
     <div class="header-inner">
       <a href="#/" class="brand" style="text-decoration:none;">
-        <span class="brand-badge">🤖</span>
-        <span>
-          سفراء الذكاء الاصطناعي
-          <div class="brand-sub">AI Ambassadors Hub — نسخة تجريبية</div>
-        </span>
+        <span class="brand-badge">AI</span>
+        <span>سفراء الذكاء الاصطناعي</span>
       </a>
       <nav class="nav">
         ${link("home", "#/", "الرئيسية")}
-        ${link("submit", "#/submit", "شارك تحدي")}
-        ${link("ambassadors", "#/ambassadors", "السفراء")}
-        ${link("my-requests", "#/my-requests", "طلباتي")}
-        <a href="#/workspace" class="workspace-link ${active === "workspace" ? "active" : ""}">
-          <span class="lock-icon">🔒</span> مساحة السفراء
-        </a>
+        ${link("share", "#/share", "شارك معنا")}
+        <a href="#/workspace" class="workspace-link ${active === "workspace" ? "active" : ""}">بوابة السفراء</a>
         ${ambBox}
       </nav>
     </div>`;
@@ -255,581 +175,466 @@ function parseHash() {
 // الصفحة الرئيسية
 // ---------------------------------------------------------------------------
 function pageHome() {
-  if (!State.employee) {
-    return `
-      <div class="hero">
-        <h1>حوّل تحديات العمل إلى فرص بالذكاء الاصطناعي</h1>
-        <p class="lead">شاركنا التحدي الذي تواجهه في عملك، وسيساعدك سفراء الذكاء الاصطناعي في اكتشاف أفضل طريقة لمعالجته.</p>
-      </div>
-      <div class="card" style="max-width:460px;margin:0 auto;">
-        <h3>مرحبًا بك — لنبدأ بتعريف بسيط</h3>
-        <p class="text-muted" style="font-size:13.5px;">بيانات سريعة لمرة واحدة فقط، بدون كلمة مرور.</p>
-        ${registerFormHtml()}
-      </div>`;
-  }
   return `
     <div class="hero">
-      <h1>حوّل تحديات العمل إلى فرص بالذكاء الاصطناعي</h1>
-      <p class="lead">شاركنا التحدي الذي تواجهه في عملك، وسيساعدك سفراء الذكاء الاصطناعي في اكتشاف أفضل طريقة لمعالجته.</p>
-      <p class="text-muted">أهلًا، <b>${escapeHtml(State.employee.name)}</b> — ${escapeHtml(State.employee.department)}
-        · <button class="btn-ghost btn-sm" data-action="switchEmployee" type="button" style="border:none;background:none;cursor:pointer;text-decoration:underline;">ليس أنت؟ تبديل الحساب</button>
+      <h1>حوّل تحديات عملك إلى فرص بالذكاء الاصطناعي</h1>
+      <p class="lead">
+        كل يوم نواجه مهامًا متكررة، إجراءات تأخذ وقتًا، وتحديات يمكن تنفيذها بطريقة أذكى.
+        تهدف مبادرة سفراء الذكاء الاصطناعي إلى مساعدتك في اكتشاف كيف يمكن للذكاء الاصطناعي أن
+        يسهّل عملك، يختصر الوقت، ويرفع الكفاءة. إذا كان لديك إجراء متكرر، مهمة تستهلك وقتك،
+        أو تحدٍ تعتقد أنه يمكن تحسينه أو أتمتته، شاركنا به. سيعمل معك سفراء الذكاء الاصطناعي على
+        فهم التحدي، ودراسة الفرصة، والمساعدة في تحويلها إلى حل عملي يمكن تطبيقه والاستفادة منه
+        في العمل.
       </p>
+      <a class="btn btn-primary btn-lg" href="#/share/challenge">شاركنا تحديك</a>
     </div>
-    <div class="action-grid">
-      <a class="action-card" href="#/submit"><span class="icon">📝</span><div class="title">شارك تحدي</div><div class="desc">أقل من دقيقتين</div></a>
-      <a class="action-card" href="#/ambassadors"><span class="icon">🧭</span><div class="title">اطلب مساعدة</div><div class="desc">تواصل مباشرة مع سفير</div></a>
-      <a class="action-card" href="#/ambassadors"><span class="icon">👥</span><div class="title">تعرف على السفراء</div><div class="desc">دليل السفراء العشرة</div></a>
-      <a class="action-card" href="#/my-requests"><span class="icon">📋</span><div class="title">تابع طلباتك</div><div class="desc">حالة كل طلباتك</div></a>
+
+    <div class="card callout-card">
+      <h3>عندك تحدٍ؟</h3>
+      <p class="text-muted">قد تكون بدايته فكرة تستحق أن تتحول إلى حل. شاركنا تحديك، وسنساعدك في
+        إيجاد طريقة أذكى وأسرع لإنجازه باستخدام الذكاء الاصطناعي.</p>
+      <a class="btn btn-outline" href="#/share/challenge">شاركنا تحديك</a>
+    </div>
+
+    <div class="card callout-card">
+      <h3>تريد المساهمة في بناء حلول الذكاء الاصطناعي؟</h3>
+      <p class="text-muted">إذا كانت لديك خبرة أو رغبة في المساهمة ضمن فرق تطوير حلول الذكاء
+        الاصطناعي داخل المؤسسة، سجّل اهتمامك وسيتواصل معك أحد سفراء الذكاء الاصطناعي.</p>
+      <a class="btn btn-outline" href="#/share/participate">سجّل اهتمامك بالمشاركة</a>
     </div>`;
 }
 
-function registerFormHtml(hiddenNext) {
+// ---------------------------------------------------------------------------
+// شارك معنا — Conditional Branching بين تحدٍّ ومشاركة
+// ---------------------------------------------------------------------------
+function pageShare() {
   return `
-    <form data-form="registerEmployee">
-      ${hiddenNext ? `<input type="hidden" name="next" value="${escapeHtml(hiddenNext)}"/>` : ""}
-      <div class="form-group">
-        <label class="field-label">الاسم الثنائي</label>
-        <input type="text" name="name" required placeholder="مثال: عبدالله الأحمدي" />
-      </div>
-      <div class="form-group">
-        <label class="field-label">الرقم الوظيفي</label>
-        <input type="text" name="employeeId" required placeholder="مثال: 90045" />
-        <div class="field-hint">يُستخدم فقط لتحديد طلباتك لاحقًا، ولا يظهر في أي إحصاءات عامة.</div>
-      </div>
-      <div class="form-group">
-        <label class="field-label">الإدارة</label>
-        <select name="department" required>${selectOptions(DEPARTMENTS, null, null, null, "اختر إدارتك")}</select>
-      </div>
-      <button class="btn btn-primary btn-block" type="submit">متابعة</button>
-    </form>`;
+    <div class="page-title-row"><h2>شارك معنا</h2></div>
+    <div class="grid grid-2">
+      <a class="card branch-card" href="#/share/challenge">
+        <h3>شارك تحديًا</h3>
+        <p class="text-muted">لديك مهمة متكررة أو تحدٍ تريد تحسينه أو أتمتته بالذكاء الاصطناعي؟</p>
+        <span class="btn btn-primary">متابعة</span>
+      </a>
+      <a class="card branch-card" href="#/share/participate">
+        <h3>شارك في بناء منتجات الذكاء الاصطناعي</h3>
+        <p class="text-muted">تريد المساهمة ضمن فريق بناء حلول الذكاء الاصطناعي داخل المؤسسة؟</p>
+        <span class="btn btn-primary">متابعة</span>
+      </a>
+    </div>`;
 }
 
-// ---------------------------------------------------------------------------
-// شارك تحدي
-// ---------------------------------------------------------------------------
-function pageSubmit(query) {
-  if (!State.employee) {
-    return `<div class="page-title-row"><h2>شارك تحدي</h2></div>
-      <div class="card" style="max-width:460px;">
-        <p class="text-muted">سجّل بياناتك أولًا (لمرة واحدة) لمتابعة مشاركة التحدي.</p>
-        ${registerFormHtml("submit")}
-      </div>`;
-  }
-
-  const amb = query.amb ? getAmbassadorById(query.amb) : null;
-  const isConsult = query.consult === "1" && amb;
-
-  let banner = "";
-  if (amb && !isConsult) {
-    banner = `<div class="notice-box" style="margin-bottom:16px;">🎯 سيتم توجيه هذا الطلب مباشرة إلى السفير <b>${escapeHtml(amb.name)}</b> (${escapeHtml(amb.department)}).</div>`;
-  } else if (isConsult) {
-    banner = `<div class="notice-box" style="margin-bottom:16px;">📅 طلب استشارة مع <b>${escapeHtml(amb.name)}</b> — الموعد: ${escapeHtml(query.day || "")} ${escapeHtml(query.start || "")}–${escapeHtml(query.end || "")}</div>`;
-  }
-
+function employeeFieldsHtml() {
   return `
-    <div class="page-title-row"><h2>شارك تحدي</h2></div>
-    <div class="notice-box" style="margin-bottom:20px;">⚠️ يرجى عدم إدخال بيانات سرية أو معلومات حساسة ضمن وصف التحدي.</div>
-    ${banner}
-    <form data-form="submitChallenge" class="card" style="max-width:640px;">
-      <input type="hidden" name="amb" value="${amb ? escapeHtml(amb.id) : ""}"/>
-      <input type="hidden" name="ambName" value="${amb ? escapeHtml(amb.name) : ""}"/>
-      <input type="hidden" name="isConsult" value="${isConsult ? "1" : ""}"/>
-      <input type="hidden" name="slot" value="${isConsult ? escapeHtml((query.day || "") + " " + (query.start || "") + "–" + (query.end || "")) : ""}"/>
+    <div class="form-group">
+      <label class="field-label">الاسم الثنائي</label>
+      <input type="text" name="employeeName" required placeholder="مثال: عبدالله الأحمدي" />
+    </div>
+    <div class="form-group">
+      <label class="field-label">الرقم الوظيفي</label>
+      <input type="text" name="employeeId" required placeholder="مثال: 90045" />
+    </div>
+    <div class="form-group">
+      <label class="field-label">الإدارة</label>
+      <select name="department" required>${selectOptions(DEPARTMENTS, null, null, null, "اختر الإدارة")}</select>
+    </div>
+    <div class="form-group">
+      <label class="field-label">المسار</label>
+      <select name="track" required>${selectOptions(AI_TRACKS, null, null, null, "اختر المسار")}</select>
+    </div>
+    <div class="form-group">
+      <label class="field-label">السفير المفضّل للتواصل (اختياري)</label>
+      <select name="ambassadorId">
+        <option value="">بدون تحديد</option>
+        ${State.ambassadors.map((a) => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name)} — ${escapeHtml(a.department)}</option>`).join("")}
+      </select>
+      <div class="field-hint">هذا تعيين مبدئي فقط — قد يُعاد توجيه طلبك لسفير آخر أنسب لتخصص التحدي.</div>
+    </div>`;
+}
 
+function pageShareChallenge() {
+  return `
+    <div class="page-title-row"><h2>شارك تحديًا</h2></div>
+    <div class="notice-box" style="margin-bottom:20px;">يرجى عدم إدخال بيانات سرية أو معلومات حساسة ضمن وصف التحدي.</div>
+    <form data-form="submitChallenge" class="card" style="max-width:680px;">
+      ${employeeFieldsHtml()}
       <div class="form-group">
         <label class="field-label">عنوان التحدي</label>
         <input type="text" name="title" required placeholder="مثال: إعداد التقرير الأسبوعي يدويًا" />
       </div>
       <div class="form-group">
-        <label class="field-label">ما المهمة أو المشكلة التي تستهلك وقتك؟</label>
-        <textarea name="description" required placeholder="اشرح التحدي باختصار"></textarea>
+        <label class="field-label">شرح التحدي</label>
+        <textarea name="description" required placeholder="اشرح التحدي والمهمة التي تستهلك وقتك"></textarea>
       </div>
       <div class="form-group">
-        <label class="field-label">كيف تنفذ هذه المهمة حاليًا؟</label>
-        <textarea name="currentMethod" required placeholder="الطريقة الحالية خطوة بخطوة"></textarea>
-      </div>
-      <div class="form-group">
-        <label class="field-label">كم تتكرر؟</label>
-        ${pillGroup("frequency", FREQUENCIES, null, true)}
-      </div>
-      <div class="form-group">
-        <label class="field-label">تقريبًا كم تستغرق منك؟</label>
-        <input type="text" name="timeSpent" required placeholder="مثال: ساعة يوميًا" />
+        <label class="field-label">الوقت الذي تستغرقه المهمة تقريبًا</label>
+        <input type="text" name="timeImpact" required placeholder="مثال: ساعة يوميًا" />
       </div>
       <div class="form-group">
         <label class="field-label">من يتأثر بهذا التحدي؟</label>
-        ${pillGroup("affectedScope", SCOPES, null, true)}
+        <input type="text" name="affectedParties" required placeholder="مثال: فريقي، إدارتي بالكامل..." />
       </div>
-      <div class="form-group">
-        <label class="field-label">ما نوع المساعدة التي تبحث عنها؟</label>
-        ${pillGroup("helpType", HELP_TYPES, null, true)}
-      </div>
-      <button class="btn btn-primary btn-block" type="submit">إرسال الطلب</button>
+      <button class="btn btn-primary btn-block" type="submit">إرسال التحدي</button>
     </form>`;
 }
 
-// ---------------------------------------------------------------------------
-// دليل السفراء
-// ---------------------------------------------------------------------------
-function pageAmbassadorsList() {
-  if (!State.loaded.ambassadors) return loadingHtml();
+function pageShareParticipate() {
   return `
-    <div class="page-title-row"><h2>سفراء الذكاء الاصطناعي</h2><span class="text-faint">${State.ambassadors.length} سفير</span></div>
-    <div class="grid grid-3">${State.ambassadors.map(ambassadorCardHtml).join("")}</div>`;
+    <div class="page-title-row"><h2>شارك في بناء منتجات الذكاء الاصطناعي</h2></div>
+    <form data-form="submitParticipation" class="card" style="max-width:680px;">
+      ${employeeFieldsHtml()}
+      <div class="form-group">
+        <label class="field-label">أدوات الذكاء الاصطناعي التي تستخدمها</label>
+        ${checkGroup("aiTools", AI_TOOLS, [])}
+        <input type="text" name="aiToolsOther" placeholder="إذا اخترت «أخرى» اذكرها هنا" style="margin-top:8px;" />
+      </div>
+      <div class="form-group">
+        <label class="field-label">هل سبق لك بناء منتج أو حل باستخدام الذكاء الاصطناعي؟</label>
+        ${pillGroup("hasBuiltBefore", ["نعم", "لا"], null, true)}
+      </div>
+      <div class="form-group">
+        <label class="field-label">صِف تجربتك إن وُجدت (اختياري)</label>
+        <textarea name="experienceDescription" placeholder="وصف مختصر لأي تجربة سابقة"></textarea>
+      </div>
+      <button class="btn btn-primary btn-block" type="submit">إرسال طلب المشاركة</button>
+    </form>`;
 }
 
-function pageAmbassadorProfile(id) {
-  if (!State.loaded.ambassadors) return loadingHtml();
-  const amb = getAmbassadorById(id);
-  if (!amb) return notFoundHtml("السفير غير موجود");
-  const openCount = openCountForAmbassador(amb.id);
+function pageShareConfirmation(query) {
+  const kind = query.kind === "participation" ? "participation" : "challenge";
+  const ref = query.ref || "";
+  const title = kind === "challenge" ? "تم استلام تحديك بنجاح" : "تم استلام طلب مشاركتك بنجاح";
   return `
-    <div class="breadcrumb"><a href="#/ambassadors">السفراء</a> / ${escapeHtml(amb.name)}</div>
-    <div class="card" style="margin-bottom:20px;">
-      <div class="amb-head" style="margin-bottom:14px;">
-        <div class="amb-avatar" style="width:58px;height:58px;font-size:22px;">${escapeHtml(initials(amb.name))}</div>
-        <div>
-          <h2 style="margin-bottom:2px;">${escapeHtml(amb.name)}</h2>
-          <div class="amb-dept">${escapeHtml(amb.department)} · ${escapeHtml(amb.track || "")}</div>
-        </div>
-      </div>
-      <div class="amb-areas" style="margin-bottom:14px;">${(amb.helpAreas || []).map((a) => `<span class="tag">${escapeHtml(a)}</span>`).join("")}</div>
-      <div class="flex-between">
-        <span class="open-count"><b>${openCount}</b> طلب مفتوح حاليًا</span>
-        <a class="btn btn-accent" href="#/submit?amb=${encodeURIComponent(amb.id)}">طلب مساعدة</a>
-      </div>
-    </div>
-    <div class="card">
-      <h3>ساعات السفير المكتبية</h3>
-      ${(amb.officeHours || []).length === 0
-        ? `<p class="text-faint">لم يتم تحديد ساعات مكتبية بعد.</p>`
-        : (amb.officeHours || [])
-            .map(
-              (h) => `
-          <div class="flex-between" style="padding:10px 0;border-bottom:1px dashed var(--border);">
-            <span><b>${escapeHtml(h.day)}</b> · ${escapeHtml(h.start)}–${escapeHtml(h.end)}</span>
-            <a class="btn btn-outline btn-sm" href="#/submit?amb=${encodeURIComponent(amb.id)}&consult=1&day=${encodeURIComponent(h.day)}&start=${encodeURIComponent(h.start)}&end=${encodeURIComponent(h.end)}">طلب استشارة</a>
-          </div>`
-            )
-            .join("")}
+    <div class="card" style="max-width:520px;margin:40px auto;text-align:center;">
+      <h2>${title}</h2>
+      <p class="text-muted">رقم الطلب: <span class="req-id" style="font-size:16px;">${escapeHtml(ref)}</span></p>
+      <p class="text-faint">يرجى الاحتفاظ برقم الطلب للمراجعة لاحقًا. سيتواصل معك سفير الذكاء الاصطناعي المختص قريبًا.</p>
+      <a class="btn btn-outline" href="#/">العودة للرئيسية</a>
     </div>`;
 }
 
 // ---------------------------------------------------------------------------
-// طلباتي
-// ---------------------------------------------------------------------------
-function pageMyRequests() {
-  if (!State.employee) {
-    return `
-      <div class="page-title-row"><h2>طلباتي</h2></div>
-      <div class="card" style="max-width:420px;">
-        <p class="text-muted">أدخل رقمك الوظيفي لعرض طلباتك، أو سجّل بيانات جديدة.</p>
-        <form data-form="lookupEmployee">
-          <div class="form-group">
-            <label class="field-label">الرقم الوظيفي</label>
-            <input type="text" name="employeeId" required placeholder="مثال: 90045" />
-          </div>
-          <button class="btn btn-primary btn-block" type="submit">عرض طلباتي</button>
-        </form>
-        <div class="divider"></div>
-        <p class="text-faint" style="margin-bottom:8px;">مستخدم جديد؟</p>
-        ${registerFormHtml()}
-      </div>`;
-  }
-  if (!State.loaded.requests) return loadingHtml();
-  const mine = State.requests.filter((r) => r.employeeId === State.employee.employeeId);
-  return `
-    <div class="page-title-row">
-      <h2>طلباتي</h2>
-      <a class="btn btn-primary" href="#/submit">+ شارك تحدي جديد</a>
-    </div>
-    <p class="text-faint" style="margin-bottom:16px;">
-      ${escapeHtml(State.employee.name)} · ${escapeHtml(State.employee.department)}
-      · <button class="btn-ghost btn-sm" data-action="switchEmployee" type="button" style="border:none;background:none;cursor:pointer;text-decoration:underline;padding:0;">ليس أنت؟</button>
-    </p>
-    ${mine.length === 0
-      ? emptyStateHtml("📭", "لا توجد طلبات بعد", "ابدأ بمشاركة أول تحدٍ يواجهك في عملك.")
-      : `<div class="grid grid-2">${mine.map((r) => requestCardHtml(r, { workspace: false })).join("")}</div>`}
-  `;
-}
-
-function pageRequestDetail(id, query) {
-  if (!State.loaded.requests) return loadingHtml();
-  const req = getRequestById(id);
-  if (!req) return notFoundHtml("لم يتم العثور على هذا الطلب");
-  const justSubmitted = query.justSubmitted === "1";
-  return `
-    <div class="breadcrumb"><a href="#/my-requests">طلباتي</a> / ${escapeHtml(req.id)}</div>
-    ${justSubmitted ? `<div class="notice-box" style="background:var(--status-done-bg);border-color:#bfe3c9;color:var(--status-done-fg);margin-bottom:16px;">✅ تم استلام طلبك بنجاح. سيتواصل معك السفير المختص قريبًا.</div>` : ""}
-    <div class="page-title-row">
-      <div>
-        <h2 style="margin-bottom:6px;">${escapeHtml(req.title)}</h2>
-        <div style="display:flex;gap:8px;align-items:center;">${statusBadge(req.status)} ${demoBadge(req.isDemo)}</div>
-      </div>
-    </div>
-    ${req.consultationSlot ? `<div class="notice-box" style="margin-bottom:16px;">📅 موعد الاستشارة المطلوب: ${escapeHtml(req.consultationSlot)}</div>` : ""}
-    <div class="card" style="margin-bottom:18px;">
-      <div class="kv-list">
-        <div class="kv-item"><div class="k">رقم الطلب</div><div class="v req-id">${escapeHtml(req.id)}</div></div>
-        <div class="kv-item"><div class="k">تاريخ التقديم</div><div class="v">${formatDate(req.createdAt)}</div></div>
-        <div class="kv-item"><div class="k">السفير المسؤول</div><div class="v">${escapeHtml(req.assignedAmbassadorName || "لم يتم التعيين بعد")}</div></div>
-        <div class="kv-item"><div class="k">نوع المساعدة</div><div class="v">${escapeHtml(req.helpType)}</div></div>
-        <div class="kv-item"><div class="k">التكرار</div><div class="v">${escapeHtml(req.frequency)}</div></div>
-        <div class="kv-item"><div class="k">الوقت المستغرق تقريبًا</div><div class="v">${escapeHtml(req.timeSpent)}</div></div>
-      </div>
-      <div class="divider"></div>
-      <div class="kv-item" style="margin-bottom:12px;"><div class="k">وصف التحدي</div><div class="v">${escapeHtml(req.description)}</div></div>
-      <div class="kv-item"><div class="k">طريقة التنفيذ الحالية</div><div class="v">${escapeHtml(req.currentMethod)}</div></div>
-    </div>
-    <div class="card">
-      <h3>سجل المتابعة</h3>
-      ${timelineHtml(req)}
-    </div>`;
-}
-
-// ---------------------------------------------------------------------------
-// مساحة السفراء
+// مساحة السفراء — الدخول والتسجيل
 // ---------------------------------------------------------------------------
 function pageWorkspaceGate() {
   if (!State.loaded.ambassadors) return loadingHtml();
   return `
-    <div class="page-title-row"><h2>مساحة السفراء</h2></div>
-    <div class="card" style="max-width:420px;">
-      <p class="text-muted" style="font-size:13.5px;">هذه المساحة مخصصة لسفراء الذكاء الاصطناعي فقط. أدخل اسمك وكود الوصول المشترك المُرسل لكم.</p>
-      <form data-form="ambassadorGate">
-        <div class="form-group">
-          <label class="field-label">أنا:</label>
-          <select name="ambassadorId" required>${selectOptions(State.ambassadors, "id", "name", null, "اختر اسمك")}</select>
-        </div>
-        <div class="form-group">
-          <label class="field-label">كود الوصول</label>
-          <input type="text" name="code" required placeholder="••••••••" />
-        </div>
-        <button class="btn btn-primary btn-block" type="submit">دخول مساحة السفراء</button>
-      </form>
+    <div class="page-title-row"><h2>بوابة السفراء</h2></div>
+    <div class="grid grid-2">
+      <div class="card" style="max-width:420px;">
+        <h3>دخول سفير مسجَّل</h3>
+        <p class="text-muted" style="font-size:13.5px;">هذه المساحة مخصصة لسفراء الذكاء الاصطناعي فقط.</p>
+        <form data-form="ambassadorGate">
+          <div class="form-group">
+            <label class="field-label">أنا:</label>
+            <select name="ambassadorId" required>${selectOptions(State.ambassadors, "id", "name", null, "اختر اسمك")}</select>
+          </div>
+          <div class="form-group">
+            <label class="field-label">كود الوصول</label>
+            <input type="text" name="code" required placeholder="••••••••" />
+          </div>
+          <button class="btn btn-primary btn-block" type="submit">دخول</button>
+        </form>
+      </div>
+      <div class="card" style="max-width:420px;">
+        <h3>سفير جديد؟</h3>
+        <p class="text-muted" style="font-size:13.5px;">سجّل بياناتك لإضافة ملفك كسفير ذكاء اصطناعي.</p>
+        <form data-form="ambassadorRegister">
+          <div class="form-group">
+            <label class="field-label">الاسم الثنائي</label>
+            <input type="text" name="name" required placeholder="اسمك الكامل" />
+          </div>
+          <div class="form-group">
+            <label class="field-label">الإدارة</label>
+            <select name="department" required>${selectOptions(DEPARTMENTS, null, null, null, "اختر الإدارة")}</select>
+          </div>
+          <div class="form-group">
+            <label class="field-label">المسار</label>
+            <select name="track" required>${selectOptions(AI_TRACKS, null, null, null, "اختر المسار")}</select>
+          </div>
+          <div class="form-group">
+            <label class="field-label">كود الوصول</label>
+            <input type="text" name="code" required placeholder="••••••••" />
+          </div>
+          <button class="btn btn-outline btn-block" type="submit">تسجيل وإنشاء ملف سفير</button>
+        </form>
+      </div>
     </div>`;
 }
 
-function workspaceSubnav(active) {
-  const item = (key, hash, label) => `<button class="${active === key ? "active" : ""}" data-action="navigate" data-href="${hash}">${label}</button>`;
+// ---------------------------------------------------------------------------
+// بوابة السفراء — البطاقات الموجزة + التبويبات الفرعية
+// ---------------------------------------------------------------------------
+function workspaceSummaryCards(query) {
+  const mine = State.challenges.filter((c) => c.assignedAmbassadorId === myId());
+  const openCount = mine.filter((c) => isChallengeOpenStatus(c.status)).length;
+  const newCount = mine.filter((c) => c.status === CHALLENGE_DEFAULT_STATUS).length;
+  const progressCount = mine.filter((c) => c.status === "implementing").length;
+  const doneCount = mine.filter((c) => c.status === "completed").length;
+  const cardLink = (status) => `#/workspace/challenges?scope=mine${status ? "&status=" + encodeURIComponent(status) : ""}`;
+  const tile = (label, num, href) => `<a class="card stat-tile stat-tile-link" href="${href}"><div class="stat-num">${num}</div><div class="stat-label">${label}</div></a>`;
+  return `<div class="grid grid-4" style="margin-bottom:22px;">
+    ${tile("تحدياتي المفتوحة", openCount, cardLink(""))}
+    ${tile("تحديات جديدة", newCount, cardLink(CHALLENGE_DEFAULT_STATUS))}
+    ${tile("قيد التنفيذ", progressCount, cardLink("implementing"))}
+    ${tile("مكتملة", doneCount, cardLink("completed"))}
+  </div>`;
+}
+function workspaceSubtabs(active) {
   return `<div class="subnav">
-    ${item("requests", "#/workspace/requests", "الطلبات")}
-    ${item("radar", "#/workspace/radar", "فرص الذكاء الاصطناعي")}
-    ${item("hours", "#/workspace/hours", "ساعات السفراء")}
-    ${item("dashboard", "#/workspace/dashboard", "لوحة المتابعة")}
+    <a class="${active === "challenges" ? "active" : ""}" href="#/workspace/challenges">التحديات</a>
+    <a class="${active === "participation" ? "active" : ""}" href="#/workspace/participation">طلبات المشاركة</a>
+  </div>`;
+}
+function scopeToggle(basePath, query) {
+  const scope = query.scope === "all" ? "all" : "mine";
+  const qs = (s) => {
+    const q = { ...query, scope: s };
+    delete q.ref;
+    const parts = Object.entries(q).filter(([, v]) => v).map(([k, v]) => `${k}=${encodeURIComponent(v)}`);
+    return parts.length ? `${basePath}?${parts.join("&")}` : basePath;
+  };
+  return `<div class="toggle-group">
+    <a class="toggle-btn ${scope === "mine" ? "active" : ""}" href="${qs("mine")}">طلباتي</a>
+    <a class="toggle-btn ${scope === "all" ? "active" : ""}" href="${qs("all")}">جميع الطلبات</a>
   </div>`;
 }
 
-const WORKSPACE_FILTERS = [
-  { key: "new", label: "جديدة", test: (r) => r.status === "new" },
-  { key: "mine", label: "طلباتي", test: (r) => State.ambIdentity && r.assignedAmbassadorId === State.ambIdentity.ambassadorId },
-  { key: "active", label: "كل النشطة", test: (r) => ACTIVE_STATUSES.includes(r.status) },
-  { key: "need_info", label: "بحاجة لمعلومات", test: (r) => r.status === "need_info" },
-  { key: "potential", label: "فرص محتملة", test: (r) => r.status === "potential_use_case" },
-  { key: "completed", label: "مكتملة", test: (r) => r.status === "completed" },
-  { key: "all", label: "الكل", test: () => true },
-];
-
-function pageWorkspaceRequests(query) {
-  if (!State.loaded.requests) return loadingHtml();
-  const activeKey = WORKSPACE_FILTERS.some((f) => f.key === query.filter) ? query.filter : "new";
-  const list = State.requests.filter(WORKSPACE_FILTERS.find((f) => f.key === activeKey).test);
-  list.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
-  return `
-    ${workspaceSubnav("requests")}
-    <div class="filter-tabs">
-      ${WORKSPACE_FILTERS.map((f) => {
-        const count = State.requests.filter(f.test).length;
-        return `<a class="filter-tab ${f.key === activeKey ? "active" : ""}" href="#/workspace/requests?filter=${f.key}">${f.label} <span class="count">(${count})</span></a>`;
-      }).join("")}
-    </div>
-    ${list.length === 0
-      ? emptyStateHtml("📭", "لا توجد طلبات في هذا التصنيف", "")
-      : `<div class="grid grid-2">${list.map((r) => requestCardHtml(r, { workspace: true })).join("")}</div>`}
-  `;
+function applyCommonFilters(list, query) {
+  const scope = query.scope === "all" ? "all" : "mine";
+  let out = list;
+  if (scope === "mine") out = out.filter((r) => r.assignedAmbassadorId === myId());
+  if (query.q) {
+    const q = query.q.toLowerCase();
+    out = out.filter((r) =>
+      (r.title || r.name || "").toLowerCase().includes(q) ||
+      (r.refNumber || r.id || "").toLowerCase().includes(q) ||
+      (r.employeeName || "").toLowerCase().includes(q)
+    );
+  }
+  if (query.amb) out = out.filter((r) => r.assignedAmbassadorId === query.amb);
+  if (query.dept) out = out.filter((r) => r.department === query.dept || r.track === query.dept);
+  if (query.status) out = out.filter((r) => r.status === query.status);
+  return out;
 }
 
-function pageWorkspaceRequestDetail(id) {
-  if (!State.loaded.requests || !State.loaded.ambassadors) return loadingHtml();
-  const req = getRequestById(id);
-  if (!req) return notFoundHtml("لم يتم العثور على هذا الطلب");
-  const dup = req.duplicateOf ? getRequestById(req.duplicateOf) : null;
-  const cluster = req.clusterId ? getClusterById(req.clusterId) : null;
-
+function filterBarHtml(basePath, query, statusList) {
+  const qs = (overrides) => {
+    const q = { ...query, ...overrides };
+    const parts = Object.entries(q).filter(([, v]) => v).map(([k, v]) => `${k}=${encodeURIComponent(v)}`);
+    return parts.length ? `${basePath}?${parts.join("&")}` : basePath;
+  };
   return `
-    ${workspaceSubnav("requests")}
-    <div class="breadcrumb"><a href="#/workspace/requests">الطلبات</a> / ${escapeHtml(req.id)}</div>
-    <div class="page-title-row">
-      <div>
-        <h2 style="margin-bottom:6px;">${escapeHtml(req.title)}</h2>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          ${statusBadge(req.status)} ${demoBadge(req.isDemo)}
-          ${req.duplicateOf ? `<span class="badge badge-outline">مكرر</span>` : ""}
+    <form class="filter-bar card" data-form="filterForm" data-base="${basePath}">
+      <input type="hidden" name="scope" value="${escapeHtml(query.scope === "all" ? "all" : "mine")}" />
+      <input type="text" name="q" value="${escapeHtml(query.q || "")}" placeholder="بحث بالعنوان أو رقم الطلب أو اسم الموظف" />
+      <select name="amb">${selectOptions(State.ambassadors, "id", "name", query.amb, "كل السفراء")}</select>
+      <select name="dept">${deptTrackSelectOptions(query.dept)}</select>
+      <select name="status">${selectOptions(statusList, "id", "label", query.status, "كل الحالات")}</select>
+      <button class="btn btn-outline btn-sm" type="submit">تطبيق الفلاتر</button>
+      ${(query.q || query.amb || query.dept || query.status) ? `<a class="btn btn-ghost btn-sm" href="${qs({ q: "", amb: "", dept: "", status: "" })}">إعادة ضبط</a>` : ""}
+    </form>`;
+}
+
+function challengeRowHtml(c) {
+  return `
+    <a class="card list-row" href="#/workspace/challenges/${encodeURIComponent(c.id)}">
+      <div class="list-row-main">
+        <div class="req-id">${escapeHtml(c.refNumber || c.id)}</div>
+        <div class="req-title">${escapeHtml(c.title)}</div>
+        <div class="req-meta">
+          <span>${escapeHtml(c.employeeName || "—")} · ${escapeHtml(c.department || "—")} / ${escapeHtml(c.track || "—")}</span>
+          <span>السفير: ${escapeHtml(c.assignedAmbassadorName || "غير معيّن")}</span>
+          <span>${formatDate(c.submittedAt || c.createdAt)}</span>
         </div>
       </div>
-    </div>
-
-    ${dup ? `<div class="notice-box" style="margin-bottom:16px;">🔗 هذا الطلب معلَّم كمكرر للطلب <a href="#/workspace/requests/${escapeHtml(dup.id)}">${escapeHtml(dup.id)} — ${escapeHtml(dup.title)}</a></div>` : ""}
-    ${req.consultationSlot ? `<div class="notice-box" style="margin-bottom:16px;">📅 طلب استشارة — الموعد: ${escapeHtml(req.consultationSlot)}</div>` : ""}
-    ${cluster ? `<div class="notice-box" style="margin-bottom:16px;">🧩 مرتبط بتجمّع الفرص: <a href="#/workspace/radar">${escapeHtml(cluster.title)}</a></div>` : ""}
-
-    <div class="card" style="margin-bottom:18px;">
-      <div class="kv-list">
-        <div class="kv-item"><div class="k">مقدّم الطلب</div><div class="v">${escapeHtml(req.employeeName)}</div></div>
-        <div class="kv-item"><div class="k">الإدارة</div><div class="v">${escapeHtml(req.department)}</div></div>
-        <div class="kv-item"><div class="k">تاريخ التقديم</div><div class="v">${formatDate(req.createdAt)}</div></div>
-        <div class="kv-item"><div class="k">رقم الطلب</div><div class="v req-id">${escapeHtml(req.id)}</div></div>
-        <div class="kv-item"><div class="k">نوع المساعدة</div><div class="v">${escapeHtml(req.helpType)}</div></div>
-        <div class="kv-item"><div class="k">التكرار / الوقت</div><div class="v">${escapeHtml(req.frequency)} · ${escapeHtml(req.timeSpent)}</div></div>
-        <div class="kv-item"><div class="k">نطاق التأثر</div><div class="v">${escapeHtml(req.affectedScope)}</div></div>
-      </div>
-      <div class="divider"></div>
-      <div class="kv-item" style="margin-bottom:12px;"><div class="k">وصف التحدي</div><div class="v">${escapeHtml(req.description)}</div></div>
-      <div class="kv-item"><div class="k">طريقة التنفيذ الحالية</div><div class="v">${escapeHtml(req.currentMethod)}</div></div>
-    </div>
-
-    <div class="card" style="margin-bottom:18px;">
-      <h3>إدارة الطلب</h3>
-      <div class="grid grid-2">
-        <div class="form-group">
-          <label class="field-label">السفير المسؤول (تعيين / نقل)</label>
-          <select data-autochange="assignAmbassador" data-id="${escapeHtml(req.id)}">
-            <option value="">غير معيّن</option>
-            ${selectOptions(State.ambassadors, "id", "name", req.assignedAmbassadorId)}
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="field-label">الحالة</label>
-          <select data-autochange="changeStatus" data-id="${escapeHtml(req.id)}">
-            ${selectOptions(STATUSES, "id", "label", req.status)}
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="field-label">التصنيف</label>
-          <select data-autochange="changeCategory" data-id="${escapeHtml(req.id)}">
-            <option value="">بدون تصنيف</option>
-            ${selectOptions(CATEGORIES, "id", "label", req.category)}
-          </select>
+      ${challengeStatusBadge(c.status)}
+    </a>`;
+}
+function participationRowHtml(p) {
+  return `
+    <a class="card list-row" href="#/workspace/participation/${encodeURIComponent(p.id)}">
+      <div class="list-row-main">
+        <div class="req-id">${escapeHtml(p.refNumber || p.id)}</div>
+        <div class="req-title">${escapeHtml(p.name)}</div>
+        <div class="req-meta">
+          <span>${escapeHtml(p.department || "—")} / ${escapeHtml(p.track || "—")}</span>
+          <span>السفير: ${escapeHtml(p.assignedAmbassadorName || "غير معيّن")}</span>
+          <span>${formatDate(p.submittedAt || p.createdAt)}</span>
         </div>
       </div>
-      <div class="flex-between" style="margin-top:6px;">
-        <button class="btn btn-outline btn-sm" type="button" data-action="openLinkCluster" data-id="${escapeHtml(req.id)}">🧩 ربط بتحدٍّ مشابه</button>
-        <button class="btn btn-outline btn-sm" type="button" data-action="openMarkDuplicate" data-id="${escapeHtml(req.id)}">🔗 تحديد كمكرر</button>
-      </div>
-    </div>
+      ${participationStatusBadge(p.status)}
+    </a>`;
+}
 
+function pageWorkspaceChallenges(query) {
+  if (!State.loaded.challenges) return loadingHtml();
+  const list = applyCommonFilters(State.challenges, query);
+  return `
+    ${workspaceSummaryCards(query)}
+    ${workspaceSubtabs("challenges")}
+    ${scopeToggle("#/workspace/challenges", query)}
+    ${filterBarHtml("#/workspace/challenges", query, CHALLENGE_STATUSES)}
+    ${list.length === 0
+      ? emptyStateHtml("لا توجد طلبات حاليًا", "لا توجد تحديات مطابقة لهذا العرض.")
+      : `<div class="list-stack">${list.map(challengeRowHtml).join("")}</div>`}`;
+}
+function pageWorkspaceParticipation(query) {
+  if (!State.loaded.participation) return loadingHtml();
+  const list = applyCommonFilters(State.participation, query);
+  return `
+    ${workspaceSummaryCards(query)}
+    ${workspaceSubtabs("participation")}
+    ${scopeToggle("#/workspace/participation", query)}
+    ${filterBarHtml("#/workspace/participation", query, PARTICIPATION_STATUSES)}
+    ${list.length === 0
+      ? emptyStateHtml("لا توجد طلبات حاليًا", "لا توجد طلبات مشاركة مطابقة لهذا العرض.")
+      : `<div class="list-stack">${list.map(participationRowHtml).join("")}</div>`}`;
+}
+
+// ---------------------------------------------------------------------------
+// تفاصيل الطلب — مشتركة بين التحديات وطلبات المشاركة
+// ---------------------------------------------------------------------------
+function historySectionsHtml(item) {
+  const statusHist = (item.statusHistory || []).slice().reverse();
+  const assignHist = (item.assignmentHistory || []).slice().reverse();
+  const notes = (item.notes || []).slice().reverse();
+  return `
     <div class="grid grid-2">
       <div class="card">
-        <h3>ملاحظات داخلية</h3>
-        <p class="text-faint" style="margin-bottom:10px;">لا تظهر للموظف.</p>
-        <form data-form="addNote" data-id="${escapeHtml(req.id)}">
+        <h3>ملاحظات الفريق</h3>
+        <p class="text-faint" style="margin-bottom:10px;">داخلية — لا تظهر لصاحب الطلب.</p>
+        <form data-form="addNote" data-id="${escapeHtml(item.id)}" data-kind="${item._kind}">
           <textarea name="text" required placeholder="أضف ملاحظة للفريق..."></textarea>
           <button class="btn btn-outline btn-sm" style="margin-top:8px;" type="submit">إضافة ملاحظة</button>
         </form>
         <div class="divider"></div>
-        ${(req.notes || []).slice().reverse().map((n) => `
-          <div class="note-item">
-            ${escapeHtml(n.text)}
-            <div class="meta">${escapeHtml(n.author || "—")} · ${formatDateTime(n.at)}</div>
-          </div>`).join("") || `<p class="text-faint">لا توجد ملاحظات بعد.</p>`}
+        <div class="note-list">
+          ${notes.map((n) => `
+            <div class="note-item">
+              ${escapeHtml(n.text)}
+              <div class="meta">${escapeHtml(n.author || "—")} — ${formatDateTime(n.at)}</div>
+            </div>`).join("") || `<p class="text-faint">لا توجد ملاحظات بعد.</p>`}
+        </div>
       </div>
       <div class="card">
-        <h3>تحديث مرئي للموظف</h3>
-        <p class="text-faint" style="margin-bottom:10px;">يظهر للموظف في صفحة «طلباتي».</p>
-        <form data-form="addUpdate" data-id="${escapeHtml(req.id)}">
-          <textarea name="text" required placeholder="اكتب تحديثًا يراه الموظف..."></textarea>
-          <button class="btn btn-primary btn-sm" style="margin-top:8px;" type="submit">إضافة تحديث</button>
-        </form>
+        <h3>سجل الحالات</h3>
+        <div class="note-list">
+          ${statusHist.map((h) => `
+            <div class="note-item">
+              ${escapeHtml(h.from ? (statusLabelFor(item._kind, h.from) + " ← ") : "")}${escapeHtml(statusLabelFor(item._kind, h.to))}
+              <div class="meta">${escapeHtml(h.changedBy || "—")} — ${formatDateTime(h.changedAt)}</div>
+            </div>`).join("") || `<p class="text-faint">لا يوجد سجل حالات بعد.</p>`}
+        </div>
         <div class="divider"></div>
-        ${(req.updates || []).slice().reverse().map((u) => `
-          <div class="update-item">
-            ${escapeHtml(u.text)}
-            <div class="meta">${escapeHtml(u.author || "—")} · ${formatDateTime(u.at)}</div>
-          </div>`).join("") || `<p class="text-faint">لا توجد تحديثات بعد.</p>`}
+        <h3>سجل التحويلات</h3>
+        <div class="note-list">
+          ${assignHist.map((h) => `
+            <div class="note-item">
+              ${escapeHtml(h.fromName || "غير معيّن")} ← ${escapeHtml(h.toName || "غير معيّن")}
+              <div class="meta">السبب: ${escapeHtml(h.reason === "أخرى" ? (h.reasonOther || "أخرى") : (h.reason || "—"))}
+                — ${escapeHtml(h.changedBy || "—")} — ${formatDateTime(h.changedAt)}</div>
+            </div>`).join("") || `<p class="text-faint">لا يوجد سجل تحويلات بعد.</p>`}
+        </div>
       </div>
     </div>`;
 }
+function statusLabelFor(kind, id) { return kind === "challenge" ? challengeStatusLabel(id) : participationStatusLabel(id); }
 
-function pageWorkspaceRadar() {
-  if (!State.loaded.clusters) return loadingHtml();
-  const CLUSTER_STATUSES = [
-    { id: "observed", label: "مرصود حديثًا" },
-    { id: "studying", label: "قيد الدراسة" },
-    { id: "adopted", label: "تم اعتماده كمبادرة AI" },
-    { id: "closed", label: "مغلق" },
-  ];
-  window.__CLUSTER_STATUSES__ = CLUSTER_STATUSES;
+function managementSectionHtml(item, kind, statusList) {
   return `
-    ${workspaceSubnav("radar")}
+    <div class="card" style="margin-bottom:18px;">
+      <h3>إدارة الطلب</h3>
+      <div class="grid grid-2">
+        <div class="form-group">
+          <label class="field-label">الحالة الحالية</label>
+          <select data-autochange="changeStatus" data-id="${escapeHtml(item.id)}" data-kind="${kind}">
+            ${selectOptions(statusList, "id", "label", item.status)}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="field-label">السفير المسؤول</label>
+          <select data-autochange="reassign" data-id="${escapeHtml(item.id)}" data-kind="${kind}">
+            <option value="">غير معيّن</option>
+            ${selectOptions(State.ambassadors, "id", "name", item.assignedAmbassadorId)}
+          </select>
+        </div>
+      </div>
+      ${item.closureReason ? `<div class="notice-box closure-box">سبب الإغلاق: ${escapeHtml(item.closureReason)}
+        <div class="text-faint" style="margin-top:4px;">${escapeHtml(item.closedBy || "—")} — ${formatDateTime(item.closedAt)}</div></div>` : ""}
+    </div>`;
+}
+
+function pageChallengeDetail(id) {
+  if (!State.loaded.challenges || !State.loaded.ambassadors) return loadingHtml();
+  const c = getChallengeById(id);
+  if (!c) return notFoundHtml("لم يتم العثور على هذا الطلب");
+  c._kind = "challenge";
+  return `
+    ${workspaceSubtabs("challenges")}
+    <div class="breadcrumb"><a href="#/workspace/challenges">التحديات</a> / ${escapeHtml(c.refNumber || c.id)}</div>
     <div class="page-title-row">
       <div>
-        <h2>رادار الفرص</h2>
-        <p class="text-faint">تحديات متكررة عبر عدة موظفين وإدارات — مؤشر على فرصة ذكاء اصطناعي واسعة الأثر.</p>
+        <h2 style="margin-bottom:6px;">${escapeHtml(c.title)}</h2>
+        <div style="display:flex;gap:8px;align-items:center;">${challengeStatusBadge(c.status)}<span class="req-id">${escapeHtml(c.refNumber || c.id)}</span></div>
       </div>
-      <button class="btn btn-primary" type="button" data-action="openCreateCluster">+ إنشاء تجمّع جديد</button>
     </div>
-    ${State.clusters.length === 0
-      ? emptyStateHtml("🧩", "لا توجد تجمّعات بعد", "اربط الطلبات المتشابهة من صفحة كل طلب.")
-      : `<div class="grid grid-2">${State.clusters.map((c) => clusterCardHtml(c, CLUSTER_STATUSES)).join("")}</div>`}
-  `;
-}
-
-function clusterCardHtml(cluster, CLUSTER_STATUSES) {
-  const reqs = requestsForCluster(cluster);
-  const deptCount = deptCountForCluster(cluster);
-  const others = State.clusters.filter((c) => c.id !== cluster.id);
-  return `
-    <div class="card cluster-card">
-      <div class="flex-between">
-        <span class="badge badge-outline">تحدٍّ متكرر</span>
-        ${demoBadge(cluster.isDemo)}
+    <div class="card" style="margin-bottom:18px;">
+      <div class="kv-list">
+        <div class="kv-item"><div class="k">اسم الموظف</div><div class="v">${escapeHtml(c.employeeName)}</div></div>
+        <div class="kv-item"><div class="k">الرقم الوظيفي</div><div class="v">${escapeHtml(c.employeeId)}</div></div>
+        <div class="kv-item"><div class="k">المسار / الإدارة</div><div class="v">${escapeHtml(c.department)} / ${escapeHtml(c.track)}</div></div>
+        <div class="kv-item"><div class="k">الوقت الذي تستغرقه المهمة</div><div class="v">${escapeHtml(c.timeImpact)}</div></div>
+        <div class="kv-item"><div class="k">من يتأثر</div><div class="v">${escapeHtml(c.affectedParties)}</div></div>
+        <div class="kv-item"><div class="k">تاريخ الإرسال</div><div class="v">${formatDate(c.submittedAt || c.createdAt)}</div></div>
       </div>
-      <h3 class="mb-0">${escapeHtml(cluster.title)}</h3>
-      <div class="cluster-nums">
-        <div class="cluster-num"><b>${reqs.length}</b><span>طلبات</span></div>
-        <div class="cluster-num"><b>${deptCount}</b><span>إدارات</span></div>
-      </div>
-      <div class="form-group mb-0">
-        <label class="field-label">الحالة الحالية</label>
-        <select data-autochange="changeClusterStatus" data-id="${escapeHtml(cluster.id)}">
-          ${selectOptions(CLUSTER_STATUSES, "id", "label", cluster.status)}
-        </select>
-      </div>
-      <details>
-        <summary style="cursor:pointer;font-size:13px;font-weight:700;color:var(--primary);">عرض الطلبات المرتبطة (${reqs.length})</summary>
-        <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px;">
-          ${reqs.map((r) => `<a href="#/workspace/requests/${escapeHtml(r.id)}" style="font-size:13px;">• ${escapeHtml(r.title)} — ${escapeHtml(r.department)}</a>`).join("") || "—"}
-        </div>
-      </details>
-      ${others.length > 0 ? `
-      <div class="form-group mb-0" style="margin-top:6px;">
-        <label class="field-label">دمج مع تجمّع آخر</label>
-        <div style="display:flex;gap:8px;">
-          <select id="merge-target-${escapeHtml(cluster.id)}">
-            ${selectOptions(others, "id", "title", null, "اختر تجمعًا")}
-          </select>
-          <button class="btn btn-outline btn-sm" type="button" data-action="mergeCluster" data-id="${escapeHtml(cluster.id)}">دمج</button>
-        </div>
-      </div>` : ""}
-    </div>`;
-}
-
-function pageWorkspaceHours() {
-  if (!State.loaded.ambassadors) return loadingHtml();
-  const DAYS = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس"];
-  window.__HOURS_DAYS__ = DAYS;
-  return `
-    ${workspaceSubnav("hours")}
-    <div class="page-title-row"><h2>ساعات السفراء المكتبية</h2></div>
-    <div class="grid grid-2">
-      ${State.ambassadors.map((amb) => {
-        const isSelf = State.ambIdentity && amb.id === State.ambIdentity.ambassadorId;
-        return `<div class="card" id="hours-card-${escapeHtml(amb.id)}">
-          <div class="flex-between" style="margin-bottom:10px;">
-            <div><b>${escapeHtml(amb.name)}</b><div class="text-faint">${escapeHtml(amb.department)}</div></div>
-            ${isSelf ? '<span class="badge badge-outline">أنت</span>' : ""}
-          </div>
-          ${isSelf ? hoursEditorHtml(amb) : hoursReadonlyHtml(amb)}
-        </div>`;
-      }).join("")}
-    </div>`;
-}
-
-function hoursReadonlyHtml(amb) {
-  if (!(amb.officeHours || []).length) return `<p class="text-faint">لم يتم تحديد ساعات مكتبية بعد.</p>`;
-  return amb.officeHours.map((h) => `<div class="hour-row"><span>${escapeHtml(h.day)}</span><span class="text-faint">${escapeHtml(h.start)}–${escapeHtml(h.end)}</span></div>`).join("");
-}
-function hoursEditorHtml(amb) {
-  const rows = window.__HOURS_EDIT_STATE__ && window.__HOURS_EDIT_STATE__.ambId === amb.id
-    ? window.__HOURS_EDIT_STATE__.rows
-    : (amb.officeHours || []).map((h) => ({ ...h }));
-  window.__HOURS_EDIT_STATE__ = { ambId: amb.id, rows };
-  const DAYS = window.__HOURS_DAYS__ || ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس"];
-  return `
-    <div id="hours-editor-${escapeHtml(amb.id)}">
-      ${rows.map((r, i) => `
-        <div class="hour-row">
-          <select data-hour-field="day" data-index="${i}">${selectOptions(DAYS, null, null, r.day)}</select>
-          <input type="time" data-hour-field="start" data-index="${i}" value="${escapeHtml(r.start || "10:00")}" />
-          <span>–</span>
-          <input type="time" data-hour-field="end" data-index="${i}" value="${escapeHtml(r.end || "11:00")}" />
-          <button class="btn btn-ghost btn-sm" type="button" data-action="removeHourRow" data-index="${i}">✕</button>
-        </div>`).join("")}
-      <div style="display:flex;gap:8px;margin-top:10px;">
-        <button class="btn btn-outline btn-sm" type="button" data-action="addHourRow">+ إضافة موعد</button>
-        <button class="btn btn-primary btn-sm" type="button" data-action="saveHours" data-id="${escapeHtml(amb.id)}">حفظ الساعات</button>
-      </div>
-    </div>`;
-}
-
-function pageWorkspaceDashboard() {
-  if (!State.loaded.requests) return loadingHtml();
-  const total = State.requests.length;
-  const byStatus = (id) => State.requests.filter((r) => r.status === id).length;
-  const active = State.requests.filter((r) => ACTIVE_STATUSES.includes(r.status)).length;
-
-  const byDept = {};
-  State.requests.forEach((r) => { byDept[r.department] = (byDept[r.department] || 0) + 1; });
-  const byCat = {};
-  State.requests.forEach((r) => { const c = r.category ? categoryLabel(r.category) : "غير مصنف"; byCat[c] = (byCat[c] || 0) + 1; });
-  const byAmb = {};
-  State.ambassadors.forEach((a) => { byAmb[a.name] = openCountForAmbassador(a.id); });
-
-  const barSection = (title, obj) => {
-    const entries = Object.entries(obj).sort((a, b) => b[1] - a[1]);
-    const max = Math.max(1, ...entries.map((e) => e[1]));
-    return `<div class="card">
-      <h3>${title}</h3>
-      ${entries.length === 0 ? `<p class="text-faint">لا توجد بيانات بعد.</p>` : entries.map(([label, val]) => `
-        <div class="bar-row">
-          <div class="bar-label">${escapeHtml(label)}</div>
-          <div class="bar-track"><div class="bar-fill" style="width:${(val / max) * 100}%;"></div></div>
-          <div class="bar-val">${val}</div>
-        </div>`).join("")}
-    </div>`;
-  };
-
-  return `
-    ${workspaceSubnav("dashboard")}
-    <div class="page-title-row"><h2>لوحة المتابعة</h2></div>
-    <div class="grid grid-4" style="margin-bottom:20px;">
-      <div class="card stat-tile"><div class="stat-num">${total}</div><div class="stat-label">إجمالي الطلبات</div></div>
-      <div class="card stat-tile"><div class="stat-num">${byStatus("new")}</div><div class="stat-label">طلبات جديدة</div></div>
-      <div class="card stat-tile"><div class="stat-num">${active}</div><div class="stat-label">طلبات نشطة</div></div>
-      <div class="card stat-tile"><div class="stat-num">${byStatus("completed")}</div><div class="stat-label">طلبات مكتملة</div></div>
-      <div class="card stat-tile"><div class="stat-num">${byStatus("potential_use_case")}</div><div class="stat-label">فرص AI محتملة</div></div>
-      <div class="card stat-tile"><div class="stat-num">${State.clusters.length}</div><div class="stat-label">تحديات متكررة</div></div>
+      <div class="divider"></div>
+      <div class="kv-item"><div class="k">شرح التحدي</div><div class="v">${escapeHtml(c.description)}</div></div>
     </div>
-    <div class="grid grid-2" style="margin-bottom:20px;">
-      ${barSection("الطلبات حسب الإدارة", byDept)}
-      ${barSection("الطلبات حسب التصنيف", byCat)}
-    </div>
-    ${barSection("الطلبات المفتوحة حسب السفير", byAmb)}
+    ${managementSectionHtml(c, "challenge", CHALLENGE_STATUSES)}
+    ${historySectionsHtml(c)}`;
+}
 
-    <div class="divider"></div>
-    <div class="card">
-      <div class="flex-between">
-        <div>
-          <h3 class="mb-0">إدارة البيانات التجريبية</h3>
-          <p class="text-faint mb-0">يحذف كل العناصر المعلّمة كـ«بيانات تجريبية» نهائيًا من قاعدة البيانات.</p>
-        </div>
-        <button class="btn btn-danger btn-sm" type="button" data-action="clearDemoData">مسح البيانات التجريبية</button>
+function pageParticipationDetail(id) {
+  if (!State.loaded.participation || !State.loaded.ambassadors) return loadingHtml();
+  const p = getParticipationById(id);
+  if (!p) return notFoundHtml("لم يتم العثور على هذا الطلب");
+  p._kind = "participation";
+  return `
+    ${workspaceSubtabs("participation")}
+    <div class="breadcrumb"><a href="#/workspace/participation">طلبات المشاركة</a> / ${escapeHtml(p.refNumber || p.id)}</div>
+    <div class="page-title-row">
+      <div>
+        <h2 style="margin-bottom:6px;">${escapeHtml(p.name)}</h2>
+        <div style="display:flex;gap:8px;align-items:center;">${participationStatusBadge(p.status)}<span class="req-id">${escapeHtml(p.refNumber || p.id)}</span></div>
       </div>
-    </div>`;
+    </div>
+    <div class="card" style="margin-bottom:18px;">
+      <div class="kv-list">
+        <div class="kv-item"><div class="k">الرقم الوظيفي</div><div class="v">${escapeHtml(p.employeeId)}</div></div>
+        <div class="kv-item"><div class="k">المسار / الإدارة</div><div class="v">${escapeHtml(p.department)} / ${escapeHtml(p.track)}</div></div>
+        <div class="kv-item"><div class="k">أدوات الذكاء الاصطناعي</div><div class="v">${escapeHtml((p.aiTools || []).join("، ") || "—")}${p.aiToolsOther ? " — " + escapeHtml(p.aiToolsOther) : ""}</div></div>
+        <div class="kv-item"><div class="k">بناء منتج سابق؟</div><div class="v">${escapeHtml(p.hasBuiltBefore || "—")}</div></div>
+        <div class="kv-item"><div class="k">تاريخ الطلب</div><div class="v">${formatDate(p.submittedAt || p.createdAt)}</div></div>
+      </div>
+      ${p.experienceDescription ? `<div class="divider"></div><div class="kv-item"><div class="k">وصف التجربة</div><div class="v">${escapeHtml(p.experienceDescription)}</div></div>` : ""}
+    </div>
+    ${managementSectionHtml(p, "participation", PARTICIPATION_STATUSES)}
+    ${historySectionsHtml(p)}`;
 }
 
 // ---------------------------------------------------------------------------
 // حالات فارغة / تحميل / غير موجود
 // ---------------------------------------------------------------------------
 function loadingHtml() { return `<div class="loading-state">جارِ تحميل البيانات…</div>`; }
-function emptyStateHtml(icon, title, desc) {
-  return `<div class="empty-state"><span class="icon">${icon}</span><h3>${escapeHtml(title)}</h3><p>${escapeHtml(desc || "")}</p></div>`;
+function emptyStateHtml(title, desc) {
+  return `<div class="empty-state"><h3>${escapeHtml(title)}</h3><p>${escapeHtml(desc || "")}</p></div>`;
 }
 function notFoundHtml(msg) {
-  return `<div class="empty-state"><span class="icon">🔍</span><h3>${escapeHtml(msg)}</h3><a href="#/" class="btn btn-outline btn-sm">العودة للرئيسية</a></div>`;
+  return `<div class="empty-state"><h3>${escapeHtml(msg)}</h3><a href="#/" class="btn btn-outline btn-sm">العودة للرئيسية</a></div>`;
 }
 function configMissingHtml() {
-  return `<div class="empty-state"><span class="icon">⚙️</span><h3>إعداد أولي مطلوب</h3>
+  return `<div class="empty-state"><h3>إعداد أولي مطلوب</h3>
     <p>لم يتم ربط قاعدة البيانات بعد. افتح ملف <code>firebase-config.js</code> وأدخل بيانات مشروع Firebase الخاص بك (راجع README.md).</p></div>`;
 }
 
@@ -852,35 +657,35 @@ function render() {
 
   if (!p0) {
     html = pageHome();
-  } else if (p0 === "submit") {
-    html = pageSubmit(query);
-    routeKey = "submit";
-  } else if (p0 === "ambassadors" && !parts[1]) {
-    html = pageAmbassadorsList();
-  } else if (p0 === "ambassador" && parts[1]) {
-    html = pageAmbassadorProfile(decodeURIComponent(parts[1]));
-  } else if (p0 === "my-requests") {
-    html = pageMyRequests();
-  } else if (p0 === "request" && parts[1]) {
-    html = pageRequestDetail(decodeURIComponent(parts[1]), query);
+  } else if (p0 === "share" && !parts[1]) {
+    html = pageShare();
+  } else if (p0 === "share" && parts[1] === "challenge") {
+    html = pageShareChallenge();
+    routeKey = "share-challenge";
+  } else if (p0 === "share" && parts[1] === "participate") {
+    html = pageShareParticipate();
+    routeKey = "share-participate";
+  } else if (p0 === "share" && parts[1] === "confirmation") {
+    html = pageShareConfirmation(query);
   } else if (p0 === "workspace") {
     if (!State.ambUnlocked) {
       html = pageWorkspaceGate();
       routeKey = "workspace-gate";
-    } else if (!parts[1] || parts[1] === "requests") {
-      if (!parts[1]) { navigate("#/workspace/requests"); return; }
-      html = pageWorkspaceRequests(query);
-      routeKey = parts[2] ? "workspace-requests-detail" : "workspace-requests";
-      if (parts[2]) html = pageWorkspaceRequestDetail(decodeURIComponent(parts[2]));
-    } else if (parts[1] === "radar") {
-      html = pageWorkspaceRadar();
-      routeKey = "workspace-radar";
-    } else if (parts[1] === "hours") {
-      html = pageWorkspaceHours();
-      routeKey = "workspace-hours";
-    } else if (parts[1] === "dashboard") {
-      html = pageWorkspaceDashboard();
-      routeKey = "workspace-dashboard";
+    } else if (!parts[1]) {
+      navigate("#/workspace/challenges");
+      return;
+    } else if (parts[1] === "challenges" && !parts[2]) {
+      html = pageWorkspaceChallenges(query);
+      routeKey = "workspace-challenges";
+    } else if (parts[1] === "challenges" && parts[2]) {
+      html = pageChallengeDetail(decodeURIComponent(parts[2]));
+      routeKey = "workspace-challenge-detail";
+    } else if (parts[1] === "participation" && !parts[2]) {
+      html = pageWorkspaceParticipation(query);
+      routeKey = "workspace-participation";
+    } else if (parts[1] === "participation" && parts[2]) {
+      html = pageParticipationDetail(decodeURIComponent(parts[2]));
+      routeKey = "workspace-participation-detail";
     } else {
       html = notFoundHtml("الصفحة غير موجودة");
     }
@@ -894,7 +699,6 @@ function render() {
 
 function onDataChange() {
   if (NO_AUTO_RERENDER.has(currentRouteKey)) return;
-  // تجنّب مسح ما يكتبه المستخدم حاليًا في نموذج مفتوح عند وصول بيانات جديدة
   const active = document.activeElement;
   const root = document.getElementById("app-root");
   const isTyping = active && root && root.contains(active) && ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName);
@@ -912,86 +716,37 @@ document.addEventListener("click", (e) => {
 
   if (action === "closeModal" || action === "closeModalOverlay") { closeModal(); return; }
   if (action === "navigate") { navigate(actionEl.dataset.href); return; }
-  if (action === "switchEmployee") { clearLocalEmployee(); render(); toast("تم تبديل الحساب، يمكنك التسجيل من جديد."); return; }
   if (action === "logoutAmbassador") { clearLocalAmbassador(); navigate("#/"); render(); return; }
-
-  if (action === "openLinkCluster") { openLinkClusterModal(actionEl.dataset.id); return; }
-  if (action === "openMarkDuplicate") { openMarkDuplicateModal(actionEl.dataset.id); return; }
-  if (action === "openCreateCluster") { openCreateClusterModal(); return; }
-
-  if (action === "mergeCluster") {
-    const sourceId = actionEl.dataset.id;
-    const select = document.getElementById("merge-target-" + sourceId);
-    const targetId = select ? select.value : "";
-    if (!targetId) { toast("اختر التجمّع الهدف أولًا", "error"); return; }
-    mergeClusters(sourceId, targetId);
-    return;
-  }
-
-  if (action === "clearDemoData") {
-    if (confirm("هل أنت متأكد من حذف كل البيانات التجريبية نهائيًا؟ لا يمكن التراجع عن هذا الإجراء.")) {
-      DataLayer.admin.clearDemoData()
-        .then((n) => toast(`تم حذف ${n} عنصر تجريبي.`))
-        .catch((e) => toast("تعذّر الحذف: " + e.message, "error"));
-    }
-    return;
-  }
-
-  if (action === "addHourRow") {
-    window.__HOURS_EDIT_STATE__.rows.push({ day: "الأحد", start: "10:00", end: "11:00" });
-    refreshHoursEditor();
-    return;
-  }
-  if (action === "removeHourRow") {
-    const idx = Number(actionEl.dataset.index);
-    window.__HOURS_EDIT_STATE__.rows.splice(idx, 1);
-    refreshHoursEditor();
-    return;
-  }
-  if (action === "saveHours") {
-    const ambId = actionEl.dataset.id;
-    const rows = window.__HOURS_EDIT_STATE__.rows;
-    DataLayer.ambassadors.update(ambId, { officeHours: rows })
-      .then(() => { toast("تم حفظ الساعات المكتبية."); NO_AUTO_RERENDER.delete("workspace-hours"); render(); NO_AUTO_RERENDER.add("workspace-hours"); })
-      .catch((e) => toast("تعذّر الحفظ: " + e.message, "error"));
-    return;
-  }
 });
 
 document.addEventListener("change", (e) => {
-  const el = e.target.closest("[data-hour-field]");
-  if (el) {
-    const idx = Number(el.dataset.index);
-    const field = el.dataset.hourField;
-    window.__HOURS_EDIT_STATE__.rows[idx][field] = el.value;
-    return;
-  }
-
   const auto = e.target.closest("[data-autochange]");
   if (!auto) return;
   const action = auto.dataset.autochange;
   const id = auto.dataset.id;
+  const kind = auto.dataset.kind;
   const value = auto.value;
+  const layer = kind === "challenge" ? DataLayer.challenges : DataLayer.participation;
+  const item = kind === "challenge" ? getChallengeById(id) : getParticipationById(id);
+  if (!item) return;
 
-  if (action === "assignAmbassador") {
-    const amb = value ? getAmbassadorById(value) : null;
-    DataLayer.requests.update(id, { assignedAmbassadorId: value || null, assignedAmbassadorName: amb ? amb.name : null })
-      .then(() => toast(amb ? `تم تعيين الطلب إلى ${amb.name}` : "تم إلغاء التعيين"))
-      .catch((e) => toast("خطأ: " + e.message, "error"));
-  } else if (action === "changeStatus") {
-    DataLayer.requests.update(id, { status: value })
-      .then(() => toast("تم تحديث الحالة إلى: " + statusLabel(value)))
-      .catch((e) => toast("خطأ: " + e.message, "error"));
-  } else if (action === "changeCategory") {
-    DataLayer.requests.update(id, { category: value || null })
-      .then(() => toast("تم تحديث التصنيف"))
-      .catch((e) => toast("خطأ: " + e.message, "error"));
-  } else if (action === "changeClusterStatus") {
-    DataLayer.clusters.update(id, { status: value })
-      .then(() => toast("تم تحديث حالة التجمّع"))
-      .catch((e) => toast("خطأ: " + e.message, "error"));
+  if (action === "changeStatus") {
+    const requiresClosure = kind === "challenge" && isChallengeClosureStatus(value);
+    if (requiresClosure) {
+      openClosureReasonModal(id, kind, item.status, value);
+      auto.value = item.status; // لا نغيّر القيمة المعروضة حتى تأكيد السبب
+      return;
+    }
+    layer.changeStatus(id, { from: item.status, to: value, changedBy: currentAmbName() })
+      .then(() => toast("تم تحديث الحالة إلى: " + statusLabelFor(kind, value)))
+      .catch((err) => toast("خطأ: " + err.message, "error"));
+  } else if (action === "reassign") {
+    openReassignModal(id, kind, item.assignedAmbassadorId, item.assignedAmbassadorName, value);
+    auto.value = item.assignedAmbassadorId || ""; // ننتظر تأكيد سبب التحويل
   }
 });
+
+function currentAmbName() { return State.ambIdentity ? State.ambIdentity.name : "سفير"; }
 
 document.addEventListener("submit", (e) => {
   const form = e.target.closest("form[data-form]");
@@ -1001,60 +756,65 @@ document.addEventListener("submit", (e) => {
   const fd = new FormData(form);
   const val = (k) => (fd.get(k) || "").toString().trim();
 
-  if (type === "registerEmployee") {
-    const name = val("name"), employeeId = val("employeeId"), department = val("department");
-    if (!name || !employeeId || !department) { toast("يرجى تعبئة كل الحقول", "error"); return; }
-    if (/[\/.#$\[\]]/.test(employeeId)) { toast("الرقم الوظيفي يحتوي على رموز غير مسموحة", "error"); return; }
-    DataLayer.employees.upsert(employeeId, { name, department })
-      .then(() => {
-        saveLocalEmployee({ employeeId, name, department });
-        toast("تم إنشاء ملفك بنجاح");
-        const next = val("next");
-        render();
-        if (next) navigate("#/" + next);
-      })
-      .catch((e) => toast("تعذّر الحفظ: " + e.message, "error"));
-    return;
-  }
-
-  if (type === "lookupEmployee") {
-    const employeeId = val("employeeId");
-    if (!employeeId) return;
-    DataLayer.employees.get(employeeId).then((emp) => {
-      if (!emp) { toast("لم يتم العثور على موظف بهذا الرقم — سجّل بيانات جديدة أدناه", "error"); return; }
-      saveLocalEmployee({ employeeId, name: emp.name, department: emp.department });
-      render();
-    }).catch((e) => toast("خطأ: " + e.message, "error"));
+  if (type === "filterForm") {
+    const base = form.dataset.base;
+    const q = { scope: val("scope") || "mine", q: val("q"), amb: val("amb"), dept: val("dept"), status: val("status") };
+    const parts = Object.entries(q).filter(([, v]) => v).map(([k, v]) => `${k}=${encodeURIComponent(v)}`);
+    navigate(parts.length ? `${base}?${parts.join("&")}` : base);
     return;
   }
 
   if (type === "submitChallenge") {
-    const frequency = fd.get("frequency"), affectedScope = fd.get("affectedScope"), helpType = fd.get("helpType");
-    if (!frequency || !affectedScope || !helpType) { toast("يرجى إكمال كل الحقول المطلوبة", "error"); return; }
-    const isConsult = val("isConsult") === "1";
+    const ambId = val("ambassadorId");
+    const amb = ambId ? getAmbassadorById(ambId) : null;
     const now = new Date().toISOString();
-    const req = {
-      id: generateRequestId(),
-      employeeId: State.employee.employeeId,
-      employeeName: State.employee.name,
-      department: State.employee.department,
-      title: val("title"),
-      description: val("description"),
-      currentMethod: val("currentMethod"),
-      frequency, timeSpent: val("timeSpent"), affectedScope, helpType,
-      status: isConsult ? "consultation" : "new",
-      category: null,
-      assignedAmbassadorId: val("amb") || null,
-      assignedAmbassadorName: val("ambName") || null,
-      consultationSlot: isConsult ? val("slot") : null,
-      notes: [],
-      updates: isConsult ? [{ text: "تم تسجيل طلب استشارة للموعد: " + val("slot"), author: "النظام", at: now }] : [],
-      duplicateOf: null, clusterId: null, isDemo: false,
-      createdAt: now, updatedAt: now,
-    };
-    DataLayer.requests.create(req)
-      .then(() => { toast("تم إرسال طلبك بنجاح"); navigate(`#/request/${req.id}?justSubmitted=1`); })
-      .catch((e) => toast("تعذّر إرسال الطلب: " + e.message, "error"));
+    DataLayer.counters.next("challenges", "AI-CH").then((refNumber) => {
+      const data = {
+        id: refNumber, refNumber,
+        employeeName: val("employeeName"), employeeId: val("employeeId"),
+        department: val("department"), track: val("track"),
+        title: val("title"), description: val("description"),
+        timeImpact: val("timeImpact"), affectedParties: val("affectedParties"),
+        status: CHALLENGE_DEFAULT_STATUS,
+        closureReason: null, closedBy: null, closedAt: null,
+        originalAmbassadorId: amb ? amb.id : null, originalAmbassadorName: amb ? amb.name : null,
+        assignedAmbassadorId: amb ? amb.id : null, assignedAmbassadorName: amb ? amb.name : null,
+        statusHistory: [{ from: null, to: CHALLENGE_DEFAULT_STATUS, changedBy: "النظام", changedAt: now }],
+        assignmentHistory: [],
+        notes: [],
+        submittedAt: now, createdAt: now, updatedAt: now,
+      };
+      return DataLayer.challenges.create(refNumber, data);
+    }).then((data) => {
+      navigate(`#/share/confirmation?kind=challenge&ref=${encodeURIComponent(data.refNumber)}`);
+    }).catch((err) => toast("تعذّر إرسال الطلب: " + err.message, "error"));
+    return;
+  }
+
+  if (type === "submitParticipation") {
+    const ambId = val("ambassadorId");
+    const amb = ambId ? getAmbassadorById(ambId) : null;
+    const now = new Date().toISOString();
+    const aiTools = fd.getAll("aiTools");
+    DataLayer.counters.next("participation", "AI-PT").then((refNumber) => {
+      const data = {
+        id: refNumber, refNumber,
+        name: val("employeeName"), employeeId: val("employeeId"),
+        department: val("department"), track: val("track"),
+        aiTools, aiToolsOther: val("aiToolsOther"),
+        hasBuiltBefore: val("hasBuiltBefore"), experienceDescription: val("experienceDescription"),
+        status: PARTICIPATION_DEFAULT_STATUS,
+        originalAmbassadorId: amb ? amb.id : null, originalAmbassadorName: amb ? amb.name : null,
+        assignedAmbassadorId: amb ? amb.id : null, assignedAmbassadorName: amb ? amb.name : null,
+        statusHistory: [{ from: null, to: PARTICIPATION_DEFAULT_STATUS, changedBy: "النظام", changedAt: now }],
+        assignmentHistory: [],
+        notes: [],
+        submittedAt: now, createdAt: now, updatedAt: now,
+      };
+      return DataLayer.participation.create(refNumber, data);
+    }).then((data) => {
+      navigate(`#/share/confirmation?kind=participation&ref=${encodeURIComponent(data.refNumber)}`);
+    }).catch((err) => toast("تعذّر إرسال الطلب: " + err.message, "error"));
     return;
   }
 
@@ -1065,146 +825,97 @@ document.addEventListener("submit", (e) => {
     if (!amb) { toast("يرجى اختيار اسمك من القائمة", "error"); return; }
     saveLocalAmbassador({ ambassadorId, name: amb.name });
     toast("مرحبًا بك، " + amb.name);
-    navigate("#/workspace/requests");
+    navigate("#/workspace/challenges");
+    return;
+  }
+
+  if (type === "ambassadorRegister") {
+    const code = val("code");
+    if (code !== AMBASSADOR_ACCESS_CODE) { toast("كود الوصول غير صحيح", "error"); return; }
+    const name = val("name"), department = val("department"), track = val("track");
+    if (!name || !department || !track) { toast("يرجى تعبئة كل الحقول", "error"); return; }
+    DataLayer.ambassadors.create({ name, department, track })
+      .then((amb) => {
+        saveLocalAmbassador({ ambassadorId: amb.id, name: amb.name });
+        toast("تم إنشاء ملفك كسفير بنجاح");
+        navigate("#/workspace/challenges");
+      })
+      .catch((err) => toast("تعذّر إنشاء الملف: " + err.message, "error"));
     return;
   }
 
   if (type === "addNote") {
-    const id = form.dataset.id, text = val("text");
+    const id = form.dataset.id, kind = form.dataset.kind, text = val("text");
     if (!text) return;
-    DataLayer.requests.addNote(id, { text, author: State.ambIdentity ? State.ambIdentity.name : "سفير", at: new Date().toISOString() })
+    const layer = kind === "challenge" ? DataLayer.challenges : DataLayer.participation;
+    layer.addNote(id, { text, author: currentAmbName(), at: new Date().toISOString() })
       .then(() => { toast("تمت إضافة الملاحظة"); form.reset(); })
-      .catch((e) => toast("خطأ: " + e.message, "error"));
-    return;
-  }
-  if (type === "addUpdate") {
-    const id = form.dataset.id, text = val("text");
-    if (!text) return;
-    DataLayer.requests.addEmployeeUpdate(id, text, State.ambIdentity ? State.ambIdentity.name : "سفير")
-      .then(() => { toast("تمت إضافة التحديث"); form.reset(); })
-      .catch((e) => toast("خطأ: " + e.message, "error"));
+      .catch((err) => toast("خطأ: " + err.message, "error"));
     return;
   }
 
-  if (type === "markDuplicateForm") {
-    const id = form.dataset.id, originalId = val("originalId");
-    if (!originalId) return;
-    DataLayer.requests.update(id, { duplicateOf: originalId })
-      .then(() => { toast("تم تحديد الطلب كمكرر"); closeModal(); })
-      .catch((e) => toast("خطأ: " + e.message, "error"));
+  if (type === "closureReasonForm") {
+    const id = form.dataset.id, kind = form.dataset.kind, fromStatus = form.dataset.from, toStatus = form.dataset.to;
+    const reason = val("closureReason");
+    if (!reason) { toast("سبب الإغلاق إلزامي", "error"); return; }
+    const layer = kind === "challenge" ? DataLayer.challenges : DataLayer.participation;
+    const now = new Date().toISOString();
+    layer.changeStatus(id, { from: fromStatus, to: toStatus, changedBy: currentAmbName(), closureReason: reason, closedBy: currentAmbName(), closedAt: now })
+      .then(() => { toast("تم إغلاق الطلب"); closeModal(); })
+      .catch((err) => toast("خطأ: " + err.message, "error"));
     return;
   }
 
-  if (type === "linkClusterForm") {
-    const id = form.dataset.id;
-    const newTitle = val("newTitle");
-    const existing = fd.get("existingCluster");
-    if (newTitle) {
-      DataLayer.clusters.create({ title: newTitle, requestIds: [id], status: "observed", isDemo: false, createdAt: new Date().toISOString() })
-        .then((c) => DataLayer.requests.update(id, { clusterId: c.id }))
-        .then(() => { toast("تم إنشاء تجمّع جديد وربط الطلب به"); closeModal(); })
-        .catch((e) => toast("خطأ: " + e.message, "error"));
-    } else if (existing) {
-      DataLayer.clusters.addRequests(existing, [id])
-        .then(() => DataLayer.requests.update(id, { clusterId: existing }))
-        .then(() => { toast("تم ربط الطلب بالتجمّع"); closeModal(); })
-        .catch((e) => toast("خطأ: " + e.message, "error"));
-    } else {
-      toast("اختر تجمّعًا أو أدخل عنوانًا جديدًا", "error");
-    }
-    return;
-  }
-
-  if (type === "createClusterForm") {
-    const title = val("title");
-    const ids = fd.getAll("requestIds");
-    if (!title || ids.length === 0) { toast("أدخل عنوانًا واختر طلبًا واحدًا على الأقل", "error"); return; }
-    DataLayer.clusters.create({ title, requestIds: ids, status: "observed", isDemo: false, createdAt: new Date().toISOString() })
-      .then((c) => Promise.all(ids.map((id) => DataLayer.requests.update(id, { clusterId: c.id }))))
-      .then(() => { toast("تم إنشاء التجمّع"); closeModal(); })
-      .catch((e) => toast("خطأ: " + e.message, "error"));
+  if (type === "reassignForm") {
+    const id = form.dataset.id, kind = form.dataset.kind;
+    const fromId = form.dataset.fromId || null, fromName = form.dataset.fromName || null;
+    const toId = form.dataset.toId || null;
+    const toAmb = toId ? getAmbassadorById(toId) : null;
+    let reason = fd.get("reason");
+    const reasonOther = val("reasonOther");
+    if (!reason) { toast("يرجى اختيار سبب التحويل", "error"); return; }
+    if (reason === "أخرى" && !reasonOther) { toast("يرجى كتابة سبب التحويل", "error"); return; }
+    const layer = kind === "challenge" ? DataLayer.challenges : DataLayer.participation;
+    layer.reassign(id, {
+      from: fromId, to: toId, fromName, toName: toAmb ? toAmb.name : null,
+      reason, reasonOther, changedBy: currentAmbName(),
+    }).then(() => { toast("تم تحديث السفير المسؤول"); closeModal(); })
+      .catch((err) => toast("خطأ: " + err.message, "error"));
     return;
   }
 });
 
 // ---------------------------------------------------------------------------
-// نوافذ منبثقة مخصّصة
+// نوافذ منبثقة: سبب الإغلاق / سبب التحويل
 // ---------------------------------------------------------------------------
-function openMarkDuplicateModal(reqId) {
+function openClosureReasonModal(id, kind, fromStatus, toStatus) {
   openModal(`
-    <h3>تحديد الطلب كمكرر</h3>
-    <p class="text-faint">أدخل رقم الطلب الأصلي الذي يكرره هذا الطلب.</p>
-    <form data-form="markDuplicateForm" data-id="${escapeHtml(reqId)}">
+    <h3>سبب الإغلاق</h3>
+    <p class="text-faint">الحالة المختارة «${escapeHtml(statusLabelFor(kind, toStatus))}» تتطلب كتابة سبب الإغلاق قبل الحفظ.</p>
+    <form data-form="closureReasonForm" data-id="${escapeHtml(id)}" data-kind="${escapeHtml(kind)}" data-from="${escapeHtml(fromStatus)}" data-to="${escapeHtml(toStatus)}">
       <div class="form-group">
-        <label class="field-label">رقم الطلب الأصلي</label>
-        <input type="text" name="originalId" required placeholder="مثال: REQ-260910-AB12" />
+        <label class="field-label">سبب الإغلاق</label>
+        <textarea name="closureReason" required placeholder="اكتب سبب الإغلاق"></textarea>
       </div>
-      <button class="btn btn-primary btn-block" type="submit">تأكيد</button>
+      <button class="btn btn-primary btn-block" type="submit">تأكيد الإغلاق</button>
     </form>`);
 }
-function openLinkClusterModal(reqId) {
-  const clustersOptions = State.clusters.map((c) => `
-    <label style="display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px dashed var(--border);">
-      <input type="radio" name="existingCluster" value="${escapeHtml(c.id)}"/>
-      ${escapeHtml(c.title)} <span class="text-faint">(${(c.requestIds || []).length} طلب)</span>
-    </label>`).join("") || `<p class="text-faint">لا توجد تجمّعات بعد.</p>`;
+function openReassignModal(id, kind, fromId, fromName, toId) {
+  const toAmb = toId ? getAmbassadorById(toId) : null;
   openModal(`
-    <h3>ربط بتحدٍّ مشابه</h3>
-    <form data-form="linkClusterForm" data-id="${escapeHtml(reqId)}">
+    <h3>سبب التحويل</h3>
+    <p class="text-faint">تحويل من «${escapeHtml(fromName || "غير معيّن")}» إلى «${escapeHtml(toAmb ? toAmb.name : "غير معيّن")}»</p>
+    <form data-form="reassignForm" data-id="${escapeHtml(id)}" data-kind="${escapeHtml(kind)}" data-from-id="${escapeHtml(fromId || "")}" data-from-name="${escapeHtml(fromName || "")}" data-to-id="${escapeHtml(toId || "")}">
       <div class="form-group">
-        <label class="field-label">اختر تجمّعًا قائمًا</label>
-        ${clustersOptions}
+        <label class="field-label">سبب التحويل</label>
+        ${pillGroup("reason", REASSIGNMENT_REASONS, null, true)}
       </div>
       <div class="form-group">
-        <label class="field-label">أو أنشئ تجمّعًا جديدًا بعنوان</label>
-        <input type="text" name="newTitle" placeholder="مثال: تلخيص التقارير الشهرية" />
+        <label class="field-label">تفصيل إضافي (عند اختيار «أخرى»)</label>
+        <input type="text" name="reasonOther" placeholder="اكتب السبب" />
       </div>
-      <button class="btn btn-primary btn-block" type="submit">تأكيد الربط</button>
+      <button class="btn btn-primary btn-block" type="submit">تأكيد التحويل</button>
     </form>`);
-}
-function openCreateClusterModal() {
-  const unlinked = State.requests.filter((r) => !r.clusterId);
-  const list = unlinked.map((r) => `
-    <label style="display:flex;gap:8px;align-items:flex-start;padding:8px 0;border-bottom:1px dashed var(--border);">
-      <input type="checkbox" name="requestIds" value="${escapeHtml(r.id)}" style="margin-top:4px;"/>
-      <span>${escapeHtml(r.title)} <span class="text-faint">— ${escapeHtml(r.department)}</span></span>
-    </label>`).join("") || `<p class="text-faint">لا توجد طلبات غير مرتبطة حاليًا.</p>`;
-  openModal(`
-    <h3>إنشاء تجمّع جديد</h3>
-    <form data-form="createClusterForm">
-      <div class="form-group">
-        <label class="field-label">عنوان التحدي المشترك</label>
-        <input type="text" name="title" required placeholder="مثال: تلخيص محاضر الاجتماعات" />
-      </div>
-      <div class="form-group" style="max-height:260px;overflow-y:auto;">
-        <label class="field-label">الطلبات المرتبطة</label>
-        ${list}
-      </div>
-      <button class="btn btn-primary btn-block" type="submit">إنشاء التجمّع</button>
-    </form>`);
-}
-function mergeClusters(sourceId, targetId) {
-  const source = getClusterById(sourceId);
-  if (!source) return;
-  const ids = source.requestIds || [];
-  DataLayer.clusters.addRequests(targetId, ids)
-    .then(() => Promise.all(ids.map((id) => DataLayer.requests.update(id, { clusterId: targetId }))))
-    .then(() => DataLayer.clusters.delete(sourceId))
-    .then(() => toast("تم دمج التجمّعين بنجاح"))
-    .catch((e) => toast("خطأ: " + e.message, "error"));
-}
-function refreshHoursEditor() {
-  const ambId = window.__HOURS_EDIT_STATE__.ambId;
-  const amb = getAmbassadorById(ambId);
-  const card = document.getElementById("hours-card-" + ambId);
-  if (card && amb) {
-    card.innerHTML = `
-      <div class="flex-between" style="margin-bottom:10px;">
-        <div><b>${escapeHtml(amb.name)}</b><div class="text-faint">${escapeHtml(amb.department)}</div></div>
-        <span class="badge badge-outline">أنت</span>
-      </div>
-      ${hoursEditorHtml(amb)}`;
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1219,17 +930,7 @@ async function init() {
     return;
   }
 
-  render(); // عرض حالة التحميل فورًا
-
-  try { await seedDemoDataIfNeeded(); } catch (e) { console.error(e); }
-
-  // كل اشتراك محاط بـ try/catch منفصل حتى لا يمنع فشل أحدها الآخرَين
-  try {
-    DataLayer.requests.subscribeAll(
-      (list) => { State.requests = list; State.loaded.requests = true; onDataChange(); },
-      (err) => console.error("requests subscribe error", err)
-    );
-  } catch (e) { console.error("requests subscribeAll failed", e); }
+  render();
 
   try {
     DataLayer.ambassadors.subscribeAll(
@@ -1239,11 +940,18 @@ async function init() {
   } catch (e) { console.error("ambassadors subscribeAll failed", e); }
 
   try {
-    DataLayer.clusters.subscribeAll(
-      (list) => { State.clusters = list; State.loaded.clusters = true; onDataChange(); },
-      (err) => console.error("clusters subscribe error", err)
+    DataLayer.challenges.subscribeAll(
+      (list) => { State.challenges = list; State.loaded.challenges = true; onDataChange(); },
+      (err) => console.error("challenges subscribe error", err)
     );
-  } catch (e) { console.error("clusters subscribeAll failed", e); }
+  } catch (e) { console.error("challenges subscribeAll failed", e); }
+
+  try {
+    DataLayer.participation.subscribeAll(
+      (list) => { State.participation = list; State.loaded.participation = true; onDataChange(); },
+      (err) => console.error("participation subscribe error", err)
+    );
+  } catch (e) { console.error("participation subscribeAll failed", e); }
 }
 
 document.addEventListener("DOMContentLoaded", init);
