@@ -269,15 +269,7 @@ function employeeFieldsHtml() {
       <input type="text" name="employeeId" required placeholder="مثال: 90045" />
     </div>
     <div class="form-group">
-      <label class="field-label">الإدارة</label>
-      <select name="department" required>${selectOptions(DEPARTMENTS, null, null, null, "اختر الإدارة")}</select>
-    </div>
-    <div class="form-group">
-      <label class="field-label">المسار</label>
-      <select name="track" required>${selectOptions(AI_TRACKS, null, null, null, "اختر المسار")}</select>
-    </div>
-    <div class="form-group">
-      <label class="field-label">السفير المفضّل للتواصل (اختياري)</label>
+      <label class="field-label">اختيار السفير (اختياري)</label>
       <select name="ambassadorId">
         <option value="">بدون تحديد</option>
         ${State.ambassadors.map((a) => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name)} — ${escapeHtml(a.department)}</option>`).join("")}
