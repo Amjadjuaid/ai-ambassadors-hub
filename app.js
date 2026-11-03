@@ -224,13 +224,6 @@ function pageHome() {
     </div>
 
     <div class="card callout-card">
-      <h3>عندك تحدٍ؟</h3>
-      <p class="text-muted">قد تكون بدايته فكرة تستحق أن تتحول إلى حل. شاركنا تحديك، وسنساعدك في
-        إيجاد طريقة أذكى وأسرع لإنجازه باستخدام الذكاء الاصطناعي.</p>
-      <a class="btn btn-outline" href="#/share/challenge">شاركنا تحديك</a>
-    </div>
-
-    <div class="card callout-card">
       <h3>تريد المساهمة في بناء حلول الذكاء الاصطناعي؟</h3>
       <p class="text-muted">إذا كانت لديك خبرة أو رغبة في المساهمة ضمن فرق تطوير حلول الذكاء
         الاصطناعي، سجّل اهتمامك وسيتواصل معك أحد سفراء الذكاء الاصطناعي.</p>
@@ -467,6 +460,12 @@ function participationRowHtml(p) {
     </a>`;
 }
 
+function exportBarHtml(kind) {
+  return `<div class="export-bar" style="margin:10px 0;text-align:left;">
+    <button type="button" class="btn btn-outline btn-sm" data-action="exportXlsx" data-kind="${kind}">⬇ تنزيل Excel</button>
+  </div>`;
+}
+
 function pageWorkspaceChallenges(query) {
   if (!State.loaded.challenges) return loadingHtml();
   const list = applyCommonFilters(State.challenges, query);
@@ -475,6 +474,7 @@ function pageWorkspaceChallenges(query) {
     ${workspaceSubtabs("challenges")}
     ${scopeToggle("#/workspace/challenges", query)}
     ${filterBarHtml("#/workspace/challenges", query, CHALLENGE_STATUSES)}
+    ${exportBarHtml("challenge")}
     ${list.length === 0
       ? emptyStateHtml("لا توجد طلبات حاليًا", "لا توجد تحديات مطابقة لهذا العرض.")
       : `<div class="list-stack">${list.map(challengeRowHtml).join("")}</div>`}`;
@@ -487,6 +487,7 @@ function pageWorkspaceParticipation(query) {
     ${workspaceSubtabs("participation")}
     ${scopeToggle("#/workspace/participation", query)}
     ${filterBarHtml("#/workspace/participation", query, PARTICIPATION_STATUSES)}
+    ${exportBarHtml("participation")}
     ${list.length === 0
       ? emptyStateHtml("لا توجد طلبات حاليًا", "لا توجد طلبات مشاركة مطابقة لهذا العرض.")
       : `<div class="list-stack">${list.map(participationRowHtml).join("")}</div>`}`;
@@ -707,6 +708,48 @@ function onDataChange() {
 }
 
 // ---------------------------------------------------------------------------
+// تصدير Excel — يصدّر القائمة الحالية (بعد تطبيق الفلاتر المعروضة) كملف .xlsx
+// ---------------------------------------------------------------------------
+function exportXlsx(kind) {
+  if (typeof XLSX === "undefined") { toast("تعذّر تحميل مكتبة Excel، تحقّق من الاتصال بالإنترنت", "error"); return; }
+  const { query } = parseHash();
+  const isChallenge = kind === "challenge";
+  const source = isChallenge ? State.challenges : State.participation;
+  const list = applyCommonFilters(source, query);
+  if (list.length === 0) { toast("لا توجد بيانات لتصديرها ضمن الفلاتر الحالية", "error"); return; }
+
+  const rows = list.map((r) => isChallenge ? {
+    "رقم الطلب": r.refNumber || r.id,
+    "العنوان": r.title || "",
+    "اسم الموظف": r.employeeName || "",
+    "الرقم الوظيفي": r.employeeId || "",
+    "السفير المسؤول": r.assignedAmbassadorName || "غير معيّن",
+    "الحالة": challengeStatusLabel(r.status),
+    "الوصف": r.description || "",
+    "الوقت المستغرق": r.timeImpact || "",
+    "المتأثرون": r.affectedParties || "",
+    "تاريخ الإرسال": formatDate(r.submittedAt || r.createdAt),
+  } : {
+    "رقم الطلب": r.refNumber || r.id,
+    "الاسم": r.name || "",
+    "الرقم الوظيفي": r.employeeId || "",
+    "السفير المسؤول": r.assignedAmbassadorName || "غير معيّن",
+    "الحالة": participationStatusLabel(r.status),
+    "أدوات الذكاء الاصطناعي والأتمتة": (r.aiTools || []).join("، ") + (r.aiToolsOther ? " — " + r.aiToolsOther : ""),
+    "سبق له بناء منتج؟": r.hasBuiltBefore || "",
+    "وصف التجربة": r.experienceDescription || "",
+    "تاريخ الإرسال": formatDate(r.submittedAt || r.createdAt),
+  });
+
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, isChallenge ? "التحديات" : "طلبات المشاركة");
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const filename = (isChallenge ? "التحديات" : "طلبات-المشاركة") + "-" + dateStr + ".xlsx";
+  XLSX.writeFile(wb, filename);
+}
+
+// ---------------------------------------------------------------------------
 // معالجات الأحداث المفوَّضة (Event delegation)
 // ---------------------------------------------------------------------------
 document.addEventListener("click", (e) => {
@@ -717,6 +760,7 @@ document.addEventListener("click", (e) => {
   if (action === "closeModal" || action === "closeModalOverlay") { closeModal(); return; }
   if (action === "navigate") { navigate(actionEl.dataset.href); return; }
   if (action === "logoutAmbassador") { clearLocalAmbassador(); navigate("#/"); render(); return; }
+  if (action === "exportXlsx") { exportXlsx(actionEl.dataset.kind); return; }
 });
 
 document.addEventListener("change", (e) => {
