@@ -1,145 +1,127 @@
 // ============================================================================
 // data.js — طبقة الوصول للبيانات (Data Access Layer)
 //
-// كل استدعاءات Firestore تمر من هنا فقط. باقي الملفات (app.js) لا تعرف شيئًا
-// عن Firestore مباشرة — تتعامل فقط مع الدوال أدناه.
+// لم تعد هذه الطبقة تتحدث مع Firestore مباشرة من المتصفح إطلاقًا — كل شي يمر
+// عبر الـ Backend API (انظر مجلد backend/) الذي يحمل مفاتيح Firebase الحقيقية
+// ويتحقق من الصلاحيات. باقي الملفات (app.js) لا تعرف شيئًا عن هذا التفصيل —
+// تتعامل فقط مع الدوال أدناه، تمامًا كما كانت تتعامل مع DataLayer القديم.
 // ============================================================================
 
 const DataLayer = (() => {
-  function db() {
-    if (!window.__FIREBASE_READY__ || !window.__FSDB__) {
-      throw new Error("Firestore غير مهيأ. تحقق من firebase-config.js");
+  // يمكن ضبط API_BASE من index.html عبر window.__API_BASE__ (مثلًا لو الواجهة
+  // والـ Backend على نطاقين مختلفين على Render). الافتراضي: نفس النطاق، /api.
+  const API_BASE = (window.__API_BASE__ || "/api").replace(/\/+$/, "");
+
+  const TOKEN_KEY = "aah_amb_identity"; // نفس المفتاح المستخدم في app.js لتخزين الهوية
+
+  function getToken() {
+    try {
+      const raw = localStorage.getItem(TOKEN_KEY);
+      if (!raw) return null;
+      const identity = JSON.parse(raw);
+      return identity && identity.token ? identity.token : null;
+    } catch (e) { return null; }
+  }
+
+  async function request(path, { method = "GET", body, auth = false } = {}) {
+    const headers = {};
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+    if (auth) {
+      const token = getToken();
+      if (token) headers["Authorization"] = "Bearer " + token;
     }
-    return window.__FSDB__;
-  }
-  const FieldValue = () => firebase.firestore.FieldValue;
-
-  function docToObj(doc) {
-    if (!doc.exists) return null;
-    return { ...doc.data(), _id: doc.id };
-  }
-
-  // =========================================================================
-  // الأرقام المرجعية — عدّاد ذري (Transaction) يضمن عدم التكرار.
-  // =========================================================================
-  const counters = {
-    async next(kind, prefix) {
-      const ref = db().collection("counters").doc(kind);
-      const seq = await db().runTransaction(async (tx) => {
-        const snap = await tx.get(ref);
-        const current = snap.exists ? (snap.data().seq || 0) : 0;
-        const nextSeq = current + 1;
-        tx.set(ref, { seq: nextSeq }, { merge: true });
-        return nextSeq;
+    let res;
+    try {
+      res = await fetch(API_BASE + path, {
+        method,
+        headers,
+        body: body !== undefined ? JSON.stringify(body) : undefined,
       });
-      return `${prefix}-${String(seq).padStart(4, "0")}`;
+    } catch (networkErr) {
+      throw new Error("تعذّر الاتصال بالسيرفر. تحقق من اتصالك بالإنترنت.");
+    }
+    let json = null;
+    try { json = await res.json(); } catch (e) { /* رد بدون محتوى */ }
+    if (!res.ok) {
+      const msg = (json && json.error) || `خطأ غير متوقع (${res.status})`;
+      const err = new Error(msg);
+      err.status = res.status;
+      throw err;
+    }
+    return json;
+  }
+
+  // =========================================================================
+  // تسجيل دخول السفراء — يستبدل كود الوصول المشترك القديم بكلمة مرور فردية
+  // محققة من السيرفر، ويُخزَّن JWT محليًا للاستخدام في الطلبات اللاحقة.
+  // =========================================================================
+  const auth = {
+    async login(ambassadorId, password) {
+      return request("/auth/login", { method: "POST", body: { ambassadorId, password } });
+    },
+    async changePassword(oldPassword, newPassword) {
+      return request("/auth/change-password", { method: "POST", auth: true, body: { oldPassword, newPassword } });
     },
   };
 
+  // الأرقام المرجعية أصبح توليدها بالكامل من السيرفر ضمن إنشاء التحدي/`الطلب
+  // (لم تعد هناك حساجة لنداء منفصل من الواجهة الأمامية).
+
   // =========================================================================
-  // السفراء — بدون بيانات تجريبية. يُسجَّل السفير بنفسه عبر كود الوصول.
+  // السفراء — قائمة عامة (بدون تسجيل دخول) لتعبئة قوائم الاختيار فقط.
   // =========================================================================
   const ambassadors = {
     async list() {
-      const snap = await db().collection("ambassadors").get();
-      const list = snap.docs.map(docToObj).filter((a) => a && a.isDemo !== true);
-      list.sort((a, b) => (a.name || "").localeCompare(b.name || "", "ar"));
-      return list;
-    },
-    async get(id) {
-      if (!id) return null;
-      const snap = await db().collection("ambassadors").doc(id).get();
-      return docToObj(snap);
-    },
-    async create({ name, department, track }) {
-      const ref = db().collection("ambassadors").doc();
-      const data = { id: ref.id, name, department, track, createdAt: new Date().toISOString() };
-      await ref.set(data);
-      return data;
-    },
-    async update(id, patch) {
-      await db().collection("ambassadors").doc(id).update(patch);
+      return request("/ambassadors");
     },
     subscribeAll(cb, onError) {
-      return db().collection("ambassadors").onSnapshot((snap) => {
-        const list = snap.docs.map(docToObj).filter((a) => a && a.isDemo !== true);
-        list.sort((a, b) => (a.name || "").localeCompare(b.name || "", "ar"));
-        cb(list);
-      }, onError);
+      let stopped = false;
+      const tick = () => {
+        ambassadors.list().then((list) => { if (!stopped) cb(list); }).catch((err) => { if (!stopped && onError) onError(err); });
+      };
+      tick();
+      const interval = setInterval(tick, 20000);
+      return () => { stopped = true; clearInterval(interval); };
     },
   };
 
   // =========================================================================
-  // أدوات مشتركة بين التحديات وطلبات المشاركة
+  // أدوات مشتركة بين التحديات وطلبات المشاركة - نفس الواجهة القديٟة تمامًا,
+  // لكن كل عملية الآن طلب HTTP للـ Backend بدل نداء Firestore مباشرر.
   // =========================================================================
-  function buildHistoryHelpers(collectionName) {
-    const col = () => db().collection(collectionName);
+  function buildHistoryHelpers(basePath) {
     return {
-      async create(refNumber, data) {
-        const ref = col().doc(refNumber);
-        await ref.set(data);
-        return data;
-      },
-      async get(id) {
-        if (!id) return null;
-        const snap = await col().doc(id).get();
-        return docToObj(snap);
-      },
-      async update(id, patch) {
-        await col().doc(id).update({ ...patch, updatedAt: new Date().toISOString() });
-      },
-      async addNote(id, note) {
-        await col().doc(id).update({
-          notes: FieldValue().arrayUnion(note),
-          updatedAt: new Date().toISOString(),
-        });
-      },
-      async changeStatus(id, { from, to, changedBy, closureReason, closedBy, closedAt }) {
-        const patch = {
-          status: to,
-          statusHistory: FieldValue().arrayUnion({ from, to, changedBy, changedAt: new Date().toISOString() }),
-          updatedAt: new Date().toISOString(),
-        };
-        if (closureReason !== undefined) {
-          patch.closureReason = closureReason;
-          patch.closedBy = closedBy;
-          patch.closedAt = closedAt;
-        } else {
-          patch.closureReason = null;
-          patch.closedBy = null;
-          patch.closedAt = null;
-        }
-        await col().doc(id).update(patch);
-      },
-      async reassign(id, { from, to, fromName, toName, reason, reasonOther, changedBy }) {
-        await col().doc(id).update({
-          assignedAmbassadorId: to || null,
-          assignedAmbassadorName: toName || null,
-          assignmentHistory: FieldValue().arrayUnion({
-            from: from || null, to: to || null, fromName: fromName || null, toName: toName || null,
-            reason, reasonOther: reasonOther || null, changedBy, changedAt: new Date().toISOString(),
-          }),
-          updatedAt: new Date().toISOString(),
-        });
+      // create(refNumber, data) — يُستخدم الآن بشكل مختلف: السيرفر هو من يولّد
+      // الرقم المرجعي وينشئ السجل دفعة واحدة من بيانات النموذج الخام.
+      async create(formFields) {
+        return request(basePath, { method: "POST", body: formFields });
       },
       async listAll() {
-        const snap = await col().get();
-        const list = snap.docs.map(docToObj).filter((x) => x && x.archived !== true && x.isTest !== true);
-        list.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
-        return list;
+        return request(basePath, { auth: true });
       },
       subscribeAll(cb, onError) {
-        return col().onSnapshot((snap) => {
-          const list = snap.docs.map(docToObj).filter((x) => x && x.archived !== true && x.isTest !== true);
-          list.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
-          cb(list);
-        }, onError);
+        let stopped = false;
+        const tick = () => {
+          request(basePath, { auth: true }).then((list) => { if (!stopped) cb(list); }).catch((err) => { if (!stopped && onError) onError(err); });
+        };
+        tick();
+        const interval = setInterval(tick, 15000);
+        return () => { stopped = true; clearInterval(interval); };
+      },
+      async changeStatus(id, { to, closureReason }) {
+        await request(`${basePath}/${encodeURIComponent(id)}/status`, { method: "PATCH", auth: true, body: { status: to, closureReason } });
+      },
+      async addNote(id, note) {
+        await request(`${basePath}/${encodeURIComponent(id)}/notes`, { method: "POST", auth: true, body: { text: note.text } });
+      },
+      async reassign(id, { to, toName, reason, reasonOther }) {
+        await request(`${basePath}/${encodeURIComponent(id)}/reassign`, { method: "PATCH", auth: true, body: { to, toName, reason, reasonOther } });
       },
     };
   }
 
-  const challenges = buildHistoryHelpers("challenges");
-  const participation = buildHistoryHelpers("participationRequests");
+  const challenges = buildHistoryHelpers("/challenges");
+  const participation = buildHistoryHelpers("/participation");
 
-  return { counters, ambassadors, challenges, participation };
+  return { auth, ambassadors, challenges, participation };
 })();
