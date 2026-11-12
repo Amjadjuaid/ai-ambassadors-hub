@@ -107,7 +107,7 @@ const AI_AUTOMATION_TOOL_GROUPS = [
     ],
   },
   {
-    label: "أدوات الأتمتة وبناء ال Workflows",
+    label: "أدوات الأتمتة وبناء الـ Workflows",
     tools: [
       "n8n",
       "Microsoft Power Automate",
@@ -151,6 +151,6 @@ function escapeHtml(str) {
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
-    .replaceAll('"", "&quot;")
+    .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
 }
