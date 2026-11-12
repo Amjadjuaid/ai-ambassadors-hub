@@ -21,12 +21,10 @@
   <div id="toast-root" class="toast-root"></div>
   <div id="modal-root"></div>
 
-  <!-- Firebase (compat SDK — بدون أدوات بناء) -->
-  <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
+  <!-- لم تعد الواجهة تتحدث مع Firebase مباشرة — كل الاتصال الآن عبر Backend API.
+       غيّر هذا السطر فقط لو كان الـ Backend على نطاق مختلف عن الواجهة في Render. -->
+  <script>window.__API_BASE__ = "/api";</script>
 
-  <script src="firebase-config.js"></script>
-  <script src="firebase-init.js"></script>
   <script src="constants.js"></script>
   <script src="data.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
