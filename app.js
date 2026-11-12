@@ -347,8 +347,8 @@ function pageWorkspaceGate() {
           <select name="ambassadorId" required>${ambassadorSelectOptions(null, "اختر اسمك")}</select>
         </div>
         <div class="form-group">
-          <label class="field-label">كود الوصول</label>
-          <input type="text" name="code" required placeholder="••••••••" />
+          <label class="field-label">كلمة المرور</label>
+          <input type="password" name="password" required placeholder="••••••••" autocomplete="current-password" />
         </div>
         <button class="btn btn-primary btn-block" type="submit">دخول</button>
       </form>
@@ -634,10 +634,6 @@ function emptyStateHtml(title, desc) {
 function notFoundHtml(msg) {
   return `<div class="empty-state"><h3>${escapeHtml(msg)}</h3><a href="#/" class="btn btn-outline btn-sm">العودة للرئيسية</a></div>`;
 }
-function configMissingHtml() {
-  return `<div class="empty-state"><h3>إعداد أولي مطلوب</h3>
-    <p>لم يتم ربط قاعدة البيانات بعد. افتح ملف <code>firebase-config.js</code> وأدخل بيانات مشروع Firebase الخاص بك (راجع README.md).</p></div>`;
-}
 
 // ---------------------------------------------------------------------------
 // المُوجّه الرئيسي
@@ -646,11 +642,6 @@ function render() {
   const { parts, query } = parseHash();
   renderHeader(parts);
   const root = document.getElementById("app-root");
-
-  if (!window.__FIREBASE_READY__) {
-    root.innerHTML = configMissingHtml();
-    return;
-  }
 
   const p0 = parts[0] || "";
   let html = "";
@@ -759,7 +750,7 @@ document.addEventListener("click", (e) => {
 
   if (action === "closeModal" || action === "closeModalOverlay") { closeModal(); return; }
   if (action === "navigate") { navigate(actionEl.dataset.href); return; }
-  if (action === "logoutAmbassador") { clearLocalAmbassador(); navigate("#/"); render(); return; }
+  if (action === "logoutAmbassador") { stopAmbassadorData(); clearLocalAmbassador(); navigate("#/"); render(); return; }
   if (action === "exportXlsx") { exportXlsx(actionEl.dataset.kind); return; }
 });
 
@@ -814,26 +805,12 @@ document.addEventListener("submit", (e) => {
   }
 
   if (type === "submitChallenge") {
-    const ambId = val("ambassadorId");
-    const amb = ambId ? getAmbassadorById(ambId) : null;
-    const now = new Date().toISOString();
-    DataLayer.counters.next("challenges", "AI-CH").then((refNumber) => {
-      const data = {
-        id: refNumber, refNumber,
-        employeeName: val("employeeName"), employeeId: val("employeeId"),
-        department: val("department"), track: val("track"),
-        title: val("title"), description: val("description"),
-        timeImpact: val("timeImpact"), affectedParties: val("affectedParties"),
-        status: CHALLENGE_DEFAULT_STATUS,
-        closureReason: null, closedBy: null, closedAt: null,
-        originalAmbassadorId: amb ? amb.id : null, originalAmbassadorName: amb ? amb.name : null,
-        assignedAmbassadorId: amb ? amb.id : null, assignedAmbassadorName: amb ? amb.name : null,
-        statusHistory: [{ from: null, to: CHALLENGE_DEFAULT_STATUS, changedBy: "النظام", changedAt: now }],
-        assignmentHistory: [],
-        notes: [],
-        submittedAt: now, createdAt: now, updatedAt: now,
-      };
-      return DataLayer.challenges.create(refNumber, data);
+    DataLayer.challenges.create({
+      ambassadorId: val("ambassadorId"),
+      employeeName: val("employeeName"), employeeId: val("employeeId"),
+      department: val("department"), track: val("track"),
+      title: val("title"), description: val("description"),
+      timeImpact: val("timeImpact"), affectedParties: val("affectedParties"),
     }).then((data) => {
       navigate(`#/share/confirmation?kind=challenge&ref=${encodeURIComponent(data.refNumber)}`);
     }).catch((err) => toast("تعذّر إرسال الطلب: " + err.message, "error"));
@@ -841,26 +818,12 @@ document.addEventListener("submit", (e) => {
   }
 
   if (type === "submitParticipation") {
-    const ambId = val("ambassadorId");
-    const amb = ambId ? getAmbassadorById(ambId) : null;
-    const now = new Date().toISOString();
-    const aiTools = fd.getAll("aiTools");
-    DataLayer.counters.next("participation", "AI-PT").then((refNumber) => {
-      const data = {
-        id: refNumber, refNumber,
-        name: val("employeeName"), employeeId: val("employeeId"),
-        department: val("department"), track: val("track"),
-        aiTools, aiToolsOther: val("aiToolsOther"),
-        hasBuiltBefore: val("hasBuiltBefore"), experienceDescription: val("experienceDescription"),
-        status: PARTICIPATION_DEFAULT_STATUS,
-        originalAmbassadorId: amb ? amb.id : null, originalAmbassadorName: amb ? amb.name : null,
-        assignedAmbassadorId: amb ? amb.id : null, assignedAmbassadorName: amb ? amb.name : null,
-        statusHistory: [{ from: null, to: PARTICIPATION_DEFAULT_STATUS, changedBy: "النظام", changedAt: now }],
-        assignmentHistory: [],
-        notes: [],
-        submittedAt: now, createdAt: now, updatedAt: now,
-      };
-      return DataLayer.participation.create(refNumber, data);
+    DataLayer.participation.create({
+      ambassadorId: val("ambassadorId"),
+      employeeName: val("employeeName"), employeeId: val("employeeId"),
+      department: val("department"), track: val("track"),
+      aiTools: fd.getAll("aiTools"), aiToolsOther: val("aiToolsOther"),
+      hasBuiltBefore: val("hasBuiltBefore"), experienceDescription: val("experienceDescription"),
     }).then((data) => {
       navigate(`#/share/confirmation?kind=participation&ref=${encodeURIComponent(data.refNumber)}`);
     }).catch((err) => toast("تعذّر إرسال الطلب: " + err.message, "error"));
@@ -868,13 +831,14 @@ document.addEventListener("submit", (e) => {
   }
 
   if (type === "ambassadorGate") {
-    const ambassadorId = val("ambassadorId"), code = val("code");
-    if (code !== AMBASSADOR_ACCESS_CODE) { toast("كود الوصول غير صحيح", "error"); return; }
-    const amb = getAmbassadorById(ambassadorId);
-    if (!amb) { toast("يرجى اختيار اسمك من القائمة", "error"); return; }
-    saveLocalAmbassador({ ambassadorId, name: amb.name });
-    toast("مرحبًا بك، " + amb.name);
-    navigate("#/workspace/challenges");
+    const ambassadorId = val("ambassadorId"), password = val("password");
+    if (!ambassadorId) { toast("يرجى اختيار اسمك من القائمة", "error"); return; }
+    DataLayer.auth.login(ambassadorId, password).then((result) => {
+      saveLocalAmbassador({ ambassadorId, name: result.ambassador.name, token: result.token });
+      startAmbassadorData();
+      toast("مرحبًا بك، " + result.ambassador.name);
+      navigate("#/workspace/challenges");
+    }).catch((err) => toast(err.message || "كلمة المرور غير صحيحة", "error"));
     return;
   }
 
@@ -959,10 +923,14 @@ async function init() {
   loadLocalIdentities();
   window.addEventListener("hashchange", render);
 
-  if (!window.__FIREBASE_READY__) {
-    render();
-    return;
-  }
+  // نجلب قائمة السفراء أول مرة وننتظرها قبل أول عرض للصفحة، لأن صفحتي رفع
+  // تحدي/تسجيل مشاركة لا يُعاد رسمهما تلقائيًا بعد الوصول (حتى لا يُفقد ما
+  // كتبه الموظف أثناء التعبئة) — فلو كانت القائمة لسه فاضية وقت أول عرض،
+  // تبقى الصفحة عالقة على "جارِ تحميل البيانات" بلا داعٍ.
+  try {
+    State.ambassadors = await DataLayer.ambassadors.list();
+    State.loaded.ambassadors = true;
+  } catch (e) { console.error("ambassadors initial load failed", e); }
 
   render();
 
@@ -973,19 +941,40 @@ async function init() {
     );
   } catch (e) { console.error("ambassadors subscribeAll failed", e); }
 
-  try {
-    DataLayer.challenges.subscribeAll(
-      (list) => { State.challenges = list; State.loaded.challenges = true; onDataChange(); },
-      (err) => console.error("challenges subscribe error", err)
-    );
-  } catch (e) { console.error("challenges subscribeAll failed", e); }
+  startAmbassadorData();
+}
 
-  try {
-    DataLayer.participation.subscribeAll(
-      (list) => { State.participation = list; State.loaded.participation = true; onDataChange(); },
-      (err) => console.error("participation subscribe error", err)
-    );
-  } catch (e) { console.error("participation subscribeAll failed", e); }
+// بيانات التحديات وطلبات المشاركة تتطلب تسجيل دخول سفير الآن (Backend يرفضها
+// بدون ذلك). نبدأ جلب/تحديث هذه البيانات فقط بعد الدخول، ونوقفها عند الخروج،
+// بدل محاولة جلبها دائمًا وفشلها صامتًا لأي زائر غير مسجَّل.
+let _unsubChallenges = null;
+let _unsubParticipation = null;
+function handleDataError(err) {
+  console.error(err);
+  if (err && err.status === 401) {
+    stopAmbassadorData();
+    clearLocalAmbassador();
+    toast("انتهت الجلسة، الرجاء تسجيل الدخول مجددًا", "error");
+    navigate("#/workspace");
+    render();
+  }
+}
+function startAmbassadorData() {
+  if (!State.ambIdentity || _unsubChallenges) return;
+  _unsubChallenges = DataLayer.challenges.subscribeAll(
+    (list) => { State.challenges = list; State.loaded.challenges = true; onDataChange(); },
+    handleDataError
+  );
+  _unsubParticipation = DataLayer.participation.subscribeAll(
+    (list) => { State.participation = list; State.loaded.participation = true; onDataChange(); },
+    handleDataError
+  );
+}
+function stopAmbassadorData() {
+  if (_unsubChallenges) { _unsubChallenges(); _unsubChallenges = null; }
+  if (_unsubParticipation) { _unsubParticipation(); _unsubParticipation = null; }
+  State.challenges = []; State.participation = [];
+  State.loaded.challenges = false; State.loaded.participation = false;
 }
 
 document.addEventListener("DOMContentLoaded", init);
